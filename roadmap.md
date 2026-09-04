@@ -1,12 +1,12 @@
 ## Phase 0 — Project Setup
 
-* [ ] Initialize the Cargo project
-* [ ] Configure Git
-* [ ] Add `.gitignore`
-* [ ] Establish the `rully` binary
-* [ ] Add basic CLI argument handling
-* [ ] Add `--help`
-* [ ] Add `--version`
+* [x] Initialize the Cargo project
+* [x] Configure Git
+* [x] Add `.gitignore`
+* [x] Establish the `rully` binary
+* [x] Add basic CLI argument handling
+* [x] Add `--help`
+* [x] Add `--version`
 
 ---
 
@@ -84,6 +84,7 @@ rully POST https://api.example.com/users \
 **Goal:** make the CLI output readable and useful.
 
 * [ ] Pretty-print JSON responses
+* [ ] Custom Clap errors, help...
 * [ ] Display status code
 * [ ] Display response time
 * [ ] Display response size

@@ -22,12 +22,12 @@ rully GET https://api.example.com/users
 
 Features:
 
-* [ ] GET requests
-* [ ] URL arguments
-* [ ] HTTP status
-* [ ] Response body
-* [ ] Response time
-* [ ] Network error handling
+* [x] GET requests
+* [x] URL arguments
+* [x] HTTP status
+* [x] Response body
+* [x] Response time
+* [x] Network error handling
 
 ---
 

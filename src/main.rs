@@ -23,6 +23,12 @@ struct Cli {
 
     #[arg(long = "header")]
     headers: Vec<String>,
+    
+    #[arg(long = "query")]
+    queries: Vec<String>,
+    
+    #[arg(long = "body")]
+    body: Option<String>,
 }
 
 #[tokio::main]
@@ -45,15 +51,51 @@ async fn main() {
         Method::Delete => reqwest::Method::DELETE,
     };
 
-    let mut request = client.request(method, &cli.url);
-
+    let url = match reqwest::Url::parse(&cli.url) {
+        Ok(url) => url,
+        Err(error) => {
+            eprintln!("URL invalide : {error}");
+            return;
+        }
+    };
+    
+    let mut queries = Vec::new();
+    for query in &cli.queries {
+        let (name, value) = match query.split_once('=') {
+            Some(pair) => pair,
+            None => {
+                eprintln!("Format attendu pour --query : nom=valeur");
+                return;
+            }
+        };
+        if url
+            .query_pairs()
+            .any(|(existing_name, _)| existing_name == name)
+        {
+            eprintln!("Paramètre déjà présent dans l'URL : {name}");
+            return;
+        }
+        queries.push((name.to_string(), value.to_string()));
+    }
+    
+    let mut request = client.request(method, url);
     for header in cli.headers {
-        let (name, value) = header
-            .split_once(':')
-            .expect("format attendu : Nom: valeur");
+        let (name, value) = match header.split_once(':') {
+            Some(pair) => pair,
+            None => {
+                eprintln!("Format attendu pour --header : Nom: valeur");
+                return;
+            }
+        };
         request = request.header(name.trim(), value.trim());
     }
-
+    
+    if let Some(body) = cli.body {
+        request = request.body(body)
+    }
+    
+    request = request.query(&queries);
+    
     let response = match request.send().await {
         Ok(response) => response,
         Err(error) => {

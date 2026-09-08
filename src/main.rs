@@ -1,7 +1,7 @@
 use clap::{Parser, ValueEnum};
 use std::time::Instant;
 
-#[derive(Clone, Debug, ValueEnum, PartialEq)]
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq)]
 enum Method {
     #[value(name = "GET")]
     Get,
@@ -23,21 +23,51 @@ struct Cli {
 
     #[arg(long = "header")]
     headers: Vec<String>,
-    
+
     #[arg(long = "query")]
     queries: Vec<String>,
-    
+
     #[arg(long = "body")]
     body: Option<String>,
+
+    #[arg(short, long)]
+    verbose: bool,
+}
+
+fn format_size(bytes: usize) -> String {
+    let units = ["B", "KB", "MB", "GB"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit < units.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", units[unit])
+    } else {
+        format!("{size:.1} {}", units[unit])
+    }
+}
+
+fn is_sensitive_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("authorization")
+        || name.eq_ignore_ascii_case("cookie")
+        || name.eq_ignore_ascii_case("set-cookie")
+        || name.eq_ignore_ascii_case("proxy-authorization")
+        || name.eq_ignore_ascii_case("x-api-key")
+}
+
+fn display_header_value(name: &str, value: &str) -> String {
+    if is_sensitive_header(name) {
+        "[redacted]".to_string()
+    } else {
+        value.to_string()
+    }
 }
 
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-
-    println!("méthode : {:?}", cli.method);
-    println!("URL : {:?}", cli.url);
-    println!("------");
 
     let start = Instant::now();
 
@@ -58,7 +88,7 @@ async fn main() {
             return;
         }
     };
-    
+
     let mut queries = Vec::new();
     for query in &cli.queries {
         let (name, value) = match query.split_once('=') {
@@ -77,9 +107,9 @@ async fn main() {
         }
         queries.push((name.to_string(), value.to_string()));
     }
-    
+
     let mut request = client.request(method, url);
-    for header in cli.headers {
+    for header in &cli.headers {
         let (name, value) = match header.split_once(':') {
             Some(pair) => pair,
             None => {
@@ -88,14 +118,22 @@ async fn main() {
             }
         };
         request = request.header(name.trim(), value.trim());
+
+        if cli.verbose {
+            println!(
+                "→ Header: {}: {}",
+                name.trim(),
+                display_header_value(name.trim(), value.trim())
+            );
+        }
     }
-    
+
     if let Some(body) = cli.body {
         request = request.body(body)
     }
-    
+
     request = request.query(&queries);
-    
+
     let response = match request.send().await {
         Ok(response) => response,
         Err(error) => {
@@ -103,6 +141,17 @@ async fn main() {
             return;
         }
     };
+
+    if cli.verbose {
+        for (name, value) in response.headers() {
+            let value = value.to_str().unwrap_or("[non-UTF8]");
+            println!(
+                "← Header: {}: {}",
+                name,
+                display_header_value(name.as_str(), value)
+            );
+        }
+    }
 
     let status = response.status();
     let body = match response.text().await {
@@ -115,13 +164,21 @@ async fn main() {
     let finish = Instant::now();
     let duration = finish - start;
 
-    println!("Status : {status}");
+    let duration_ms = duration.as_secs_f64() * 1000.0;
+
+    println!("---");
+    println!("→ {:?} {:?}", cli.method, cli.url);
+    println!(
+        "← {} · {:.2}ms · {}",
+        status,
+        duration_ms,
+        format_size(body.len())
+    );
+    println!("---");
 
     if !body.is_empty() {
         println!("Body : {body}");
     }
-
-    println!("duration : {:?}", duration);
 }
 
 #[cfg(test)]
@@ -203,5 +260,17 @@ mod tests {
                 "Content-Type: application/json",
             ]
         );
+    }
+
+    #[test]
+    fn verbose_is_disabled_by_default() {
+        let cli = Cli::parse_from(["rully", "GET", "https://example.com"]);
+        assert!(!cli.verbose);
+    }
+
+    #[test]
+    fn parse_verbose_flag() {
+        let cli = Cli::parse_from(["rully", "GET", "https://example.com", "--verbose"]);
+        assert!(cli.verbose);
     }
 }

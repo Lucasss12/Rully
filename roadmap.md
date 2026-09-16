@@ -1,362 +1,215 @@
-## Phase 0 — Project Setup
+# Rully Roadmap
 
-* [x] Initialize the Cargo project
-* [x] Configure Git
-* [x] Add `.gitignore`
-* [x] Establish the `rully` binary
-* [x] Add basic CLI argument handling
-* [x] Add `--help`
-* [x] Add `--version`
+Rully is a terminal-first HTTP client written in Rust.
+It currently provides a CLI and will progressively evolve toward a TUI.
 
----
+This project is a good excuse for me to build a project in Rust after finishing the book :)
 
-## Phase 1 — HTTP Client
+## Current Focus
 
-**Goal:** send a basic HTTP request and display the response.
+Finalize the CLI output and error handling, then extract the HTTP engine
+into a reusable core shared by the CLI and the future TUI.
 
-Example:
+## Legend
 
-```sh
-rully GET https://api.example.com/users
-```
-
-Features:
-
-* [x] GET requests
-* [x] URL arguments
-* [x] HTTP status
-* [x] Response body
-* [x] Response time
-* [x] Network error handling
+- [x] Completed
+- [~] In progress
+- [ ] Planned
+- [-] Postponed or intentionally dropped
 
 ---
 
-## Phase 2 — Complete HTTP Requests
+## Phase 0 - Project Setup
 
-**Goal:** support the main features needed to test APIs.
+- [x] Initialize the Cargo project
+- [x] Configure Git and `.gitignore`
+- [x] Add the `rully` binary
+- [x] Add basic CLI arguments
+- [x] Add `--help`
+- [x] Add `--version`
+
+---
+
+## Phase 1 - Basic HTTP Client
+
+- [x] Send an HTTP request
+- [x] Support `GET`
+- [x] Accept a URL argument
+- [x] Display the HTTP status
+- [x] Display the response body
+- [x] Display the response time
+- [x] Handle basic network errors
+
+---
+
+## Phase 2 - Complete HTTP Requests
 
 ### HTTP Methods
 
-* [ ] GET
-* [ ] POST
-* [ ] PUT
-* [ ] PATCH
-* [ ] DELETE
+- [x] `GET`
+- [x] `POST`
+- [x] `PUT`
+- [x] `PATCH`
+- [x] `DELETE`
 
 ### Headers
 
-* [ ] Custom headers
-* [ ] Multiple headers
-* [ ] Authorization headers
-* [ ] Content-Type
-
-Example:
-
-```sh
-rully POST https://api.example.com/users \
-  --header "Authorization: Bearer xxx" \
-  --header "Content-Type: application/json"
-```
+- [x] Custom headers
+- [x] Multiple headers
+- [x] Authorization headers
+- [x] `Content-Type` header
 
 ### Query Parameters
 
-* [ ] Query parameters
-* [ ] Multiple parameters
-* [ ] Proper URL encoding
+- [x] Query parameters
+- [x] Multiple parameters
+- [x] Proper value encoding
 
 ### Request Body
 
-* [ ] Raw request body
-* [ ] JSON request body
-* [ ] Request body from a file
-
-Example:
-
-```sh
-rully POST https://api.example.com/users \
-  --body '{"name":"John"}'
-```
+- [x] Raw request body with `--body`
+- [~] JSON request body validation
+- [ ] Request body from a file with `--body-file`
 
 ---
 
-## Phase 3 — Output
+## Phase 3 - CLI Output
 
-**Goal:** make the CLI output readable and useful.
+**Goal:** make responses readable without coupling the HTTP engine to terminal output.
 
-* [ ] Pretty-print JSON responses
-* [ ] Custom Clap errors, help...
-* [ ] Display status code
-* [ ] Display response time
-* [ ] Display response size
-* [ ] Display content type
-* [ ] Add verbose mode
-* [ ] Display request headers in verbose mode
-* [ ] Display response headers in verbose mode
+- [x] Display the status code and status text
+- [x] Display the response time
+- [x] Display the response size
+- [x] Add verbose mode
+- [x] Display request headers in verbose mode
+- [x] Display response headers in verbose mode
+- [ ] Display the `Content-Type` in the summary
+- [ ] Pretty-print JSON responses
+- [ ] Preserve raw output for other content types
+- [ ] Improve Clap help and error messages
 
 Example:
 
 ```text
-→ POST /users
+<- 200 OK - 142ms - 1.2 KB - application/json
 
-← 201 Created · 142ms · 1.2 KB
+{
+  "users": []
+}
 ```
 
 ---
 
-## Phase 4 — Error Handling
+## Phase 4 - Reliable Errors
 
-**Goal:** provide clear and useful errors.
+**Goal:** provide clear errors and consistent exit codes.
 
-Handle:
-
-* [ ] Invalid URLs
-* [ ] DNS failures
-* [ ] Connection failures
-* [ ] Timeouts
-* [ ] TLS errors
-* [ ] Invalid request bodies
-* [ ] Missing files
-* [ ] Invalid CLI arguments
-
-Errors should be readable and should not expose unnecessary implementation details.
+- [ ] Create an application error type
+- [ ] Distinguish CLI, URL, network, and response errors
+- [ ] Handle invalid URLs
+- [ ] Handle DNS and connection failures
+- [ ] Handle timeouts
+- [ ] Handle invalid request bodies
+- [ ] Handle missing files
+- [ ] Return a non-zero exit code on failure
+- [ ] Avoid exposing unnecessary implementation details
 
 ---
 
-## Phase 5 — Collections
+## Phase 5 - Core Architecture
 
-**Goal:** save and organize requests.
+**Goal:** separate the HTTP engine from the CLI so it can be reused by the TUI.
 
-Example:
+- [ ] Extract CLI parsing from `main.rs`
+- [ ] Extract HTTP request execution
+- [ ] Create `Request` and `Response` models
+- [ ] Preserve status, headers, body, size, and duration
+- [ ] Return structured errors
+- [ ] Keep terminal output out of the core
+- [ ] Keep the core independent from Clap and Ratatui
+- [ ] Reduce `main.rs` to application orchestration
+
+Target initial structure:
 
 ```text
-my-api/
-├── users/
-│   ├── list
-│   ├── get
-│   └── create
-└── auth/
-    └── login
+src/
+├── main.rs
+├── cli.rs
+├── http.rs
+├── output.rs
+└── error.rs
 ```
-
-Features:
-
-* [ ] Define a request file format
-* [ ] Save requests
-* [ ] Load requests
-* [ ] Update requests
-* [ ] Delete requests
-* [ ] Organize requests into collections
-* [ ] Execute saved requests
-
-The storage format should be human-readable and Git-friendly.
 
 ---
 
-## Phase 6 — Variables & Environments
+## Phase 6 - Quality and MVP
 
-**Goal:** run the same requests against different environments.
+- [ ] Add HTTP integration tests
+- [ ] Test requests and responses with a local server
+- [ ] Test the main error cases
+- [ ] Add a README
+- [ ] Document installation
+- [ ] Document usage examples
+- [ ] Pass `cargo fmt`
+- [ ] Pass `cargo clippy -- -D warnings`
+- [ ] Pass `cargo test`
 
-Example:
+The MVP should provide:
 
-```text
-{{base_url}}/users/{{user_id}}
-```
-
-Environments:
-
-```text
-local
-staging
-production
-```
-
-Features:
-
-* [ ] Variables
-* [ ] Variable interpolation
-* [ ] Environment files
-* [ ] Environment selection
-* [ ] Default environment
-* [ ] Secret handling
-
-Secrets must not accidentally be written to logs or displayed in normal output.
+- [x] `GET` and `POST` requests
+- [x] Custom headers
+- [x] Request bodies
+- [x] Status and response time
+- [~] Basic JSON formatting
+- [~] Clear basic error handling
 
 ---
 
-## Phase 7 — Core Architecture
+## Phase 7 - Collections
 
-**Goal:** prepare the project for the TUI.
-
-The architecture should evolve toward:
-
-```text
-                RULLY CORE
-                    │
-          ┌─────────┴─────────┐
-          │                   │
-         CLI                 TUI
-```
-
-The core should contain the application logic for:
-
-* Requests
-* Responses
-* HTTP execution
-* Collections
-* Environments
-* Application errors
-
-The core should remain independent from:
-
-* CLI argument parsing
-* Terminal rendering
-* TUI widgets
-* CLI-specific output
-
-The goal is to avoid duplicating HTTP logic when the TUI is introduced.
+- [ ] Define a human-readable, Git-friendly request file format
+- [ ] Save requests
+- [ ] Load requests
+- [ ] Update requests
+- [ ] Delete requests
+- [ ] Organize requests into collections
+- [ ] Execute saved requests
 
 ---
 
-## Phase 8 — TUI
+## Phase 8 - Variables and Environments
 
-**Goal:** launch an interactive API client from the terminal.
-
-Running:
-
-```sh
-rully
-```
-
-should launch the TUI.
-
-Expected areas:
-
-* [ ] Collections
-* [ ] Request editor
-* [ ] URL editing
-* [ ] HTTP method selection
-* [ ] Headers
-* [ ] Request body
-* [ ] Send request
-* [ ] Response viewer
-* [ ] JSON formatting
-* [ ] Environment selection
-* [ ] Request history
-* [ ] Keyboard navigation
-
-The TUI should reuse the same core as the CLI.
+- [ ] Define variables
+- [ ] Interpolate variables in requests
+- [ ] Add environment files
+- [ ] Select an environment
+- [ ] Support a default environment
+- [ ] Protect secrets from logs and normal output
 
 ---
 
-## Phase 9 — Quality
+## Phase 9 - TUI
 
-**Goal:** make Rully reliable and pleasant to use.
+**Goal:** provide an interactive API client built on top of the same core.
 
-### Testing
-
-* [ ] Unit tests
-* [ ] Integration tests
-* [ ] Request/response tests
-* [ ] Collection tests
-* [ ] Environment tests
-* [ ] Error handling tests
-
-### CLI
-
-* [ ] Improve help output
-* [ ] Shell completions
-* [ ] Machine-readable output
-* [ ] Quiet mode
-
-### TUI
-
-* [ ] Search
-* [ ] Keyboard shortcuts
-* [ ] Better response viewer
-* [ ] Request history improvements
+- [ ] Launch the TUI with `rully`
+- [ ] Display collections
+- [ ] Edit requests
+- [ ] Edit URLs and methods
+- [ ] Edit headers and request bodies
+- [ ] Send requests
+- [ ] Display responses
+- [ ] Format JSON in the response view
+- [ ] Select an environment
+- [ ] Add request history
+- [ ] Add keyboard navigation
 
 ---
 
-## Phase 10 — Distribution
+## Phase 10 - Distribution
 
-**Goal:** make Rully easy to install.
-
-Release binaries for:
-
-* [ ] macOS Apple Silicon
-* [ ] macOS Intel
-* [ ] Linux
-* [ ] Windows
-
-Project:
-
-* [ ] README
-* [ ] Installation documentation
-* [ ] Usage documentation
-* [ ] GitHub releases
-* [ ] Automated release builds
-
-Long-term goal:
-
-```sh
-brew install rully
-```
-
-Rully should be distributed as a native executable.
-
----
-
-## MVP
-
-If the project starts becoming too large, the first usable version should stop around Phase 3–4.
-
-The MVP should allow:
-
-```sh
-rully GET https://api.example.com/users
-```
-
-and:
-
-```sh
-rully POST https://api.example.com/users \
-  --header "Content-Type: application/json" \
-  --body '{"name":"John"}'
-```
-
-with:
-
-* GET / POST
-* Headers
-* Request body
-* Status code
-* Response body
-* Response time
-* Basic JSON formatting
-* Basic error handling
-
-Everything after that can evolve incrementally.
-
----
-
-## Long-Term Vision
-
-Rully should provide two complementary experiences:
-
-```text
-CLI                          TUI
- │                            │
- │ rully GET <url>            │ rully
- │                            │
- └──────────┬─────────────────┘
-            │
-        RULLY CORE
-            │
-       HTTP / Storage /
-       Collections /
-       Environments
-```
-
-The CLI should remain useful for quick and scriptable requests.
-
-The TUI should provide a richer interactive experience for exploring APIs, managing requests and working with collections.
+- [ ] Finalize the documentation
+- [ ] Add automated builds
+- [ ] Publish binaries for macOS, Linux, and Windows
+- [ ] Prepare GitHub releases
+- [ ] Evaluate Homebrew distribution

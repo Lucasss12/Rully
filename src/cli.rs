@@ -28,7 +28,7 @@ pub(crate) struct Cli {
 
     #[arg(long = "body")]
     pub(crate) body: Option<String>,
-    
+
     #[arg(long = "body-file")]
     pub(crate) body_file: Option<String>,
 
@@ -40,7 +40,6 @@ pub fn parse_args() -> Cli {
     Cli::parse()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -49,40 +48,28 @@ mod tests {
         let result = Cli::try_parse_from(["rully"]);
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn rejects_missing_url() {
         let result = Cli::try_parse_from(["rully", "GET"]);
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn rejects_invalid_method() {
-        let result = Cli::try_parse_from([
-            "rully",
-            "https://example.com",
-        ]);
+        let result = Cli::try_parse_from(["rully", "https://example.com"]);
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn rejects_unknown_method() {
-        let result = Cli::try_parse_from([
-            "rully",
-            "OPTIONS",
-            "https://example.com",
-        ]);
+        let result = Cli::try_parse_from(["rully", "OPTIONS", "https://example.com"]);
         assert!(result.is_err());
     }
-    
+
     #[test]
     fn parses_default_arguments() {
-        let cli = Cli::try_parse_from([
-            "rully",
-            "GET",
-            "https://example.com",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["rully", "GET", "https://example.com"]).unwrap();
         assert_eq!(cli.method, Method::Get);
         assert_eq!(cli.url, "https://example.com");
         assert!(cli.headers.is_empty());
@@ -90,7 +77,7 @@ mod tests {
         assert!(cli.body.is_none());
         assert!(!cli.verbose);
     }
-    
+
     #[test]
     fn parses_all_supported_methods() {
         let methods = [
@@ -101,16 +88,11 @@ mod tests {
             ("DELETE", Method::Delete),
         ];
         for (input, expected) in methods {
-            let cli = Cli::try_parse_from([
-                "rully",
-                input,
-                "https://example.com",
-            ])
-            .unwrap();
+            let cli = Cli::try_parse_from(["rully", input, "https://example.com"]).unwrap();
             assert_eq!(cli.method, expected);
         }
     }
-    
+
     #[test]
     fn parses_multiple_headers() {
         let cli = Cli::try_parse_from([
@@ -127,7 +109,7 @@ mod tests {
         assert_eq!(cli.headers[0], "Authorization: Bearer token");
         assert_eq!(cli.headers[1], "Content-Type: application/json");
     }
-    
+
     #[test]
     fn parses_multiple_queries() {
         let cli = Cli::try_parse_from([
@@ -142,7 +124,7 @@ mod tests {
         .unwrap();
         assert_eq!(cli.queries, vec!["page=1", "limit=10"]);
     }
-    
+
     #[test]
     fn parses_body() {
         let cli = Cli::try_parse_from([
@@ -155,23 +137,12 @@ mod tests {
         .unwrap();
         assert_eq!(cli.body.as_deref(), Some(r#"{"name":"John"}"#));
     }
-    
+
     #[test]
     fn parses_verbose_flags() {
-        let long = Cli::try_parse_from([
-            "rully",
-            "GET",
-            "https://example.com",
-            "--verbose",
-        ])
-        .unwrap();
-        let short = Cli::try_parse_from([
-            "rully",
-            "GET",
-            "https://example.com",
-            "-v",
-        ])
-        .unwrap();
+        let long =
+            Cli::try_parse_from(["rully", "GET", "https://example.com", "--verbose"]).unwrap();
+        let short = Cli::try_parse_from(["rully", "GET", "https://example.com", "-v"]).unwrap();
         assert!(long.verbose);
         assert!(short.verbose);
     }

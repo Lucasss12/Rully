@@ -1,5 +1,7 @@
 use std::time::Instant;
 mod cli;
+mod errors;
+use errors::AppError;
 
 fn format_size(bytes: usize) -> String {
     let units = ["B", "KB", "MB", "GB"];
@@ -33,7 +35,14 @@ fn display_header_value(name: &str, value: &str) -> String {
 }
 
 #[tokio::main]
-async fn main()  {
+async fn main() {
+    if let Err(error) = run().await {
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), AppError> {
     let cli = cli::parse_args();
 
     let start = Instant::now();
@@ -48,43 +57,32 @@ async fn main()  {
         cli::Method::Delete => reqwest::Method::DELETE,
     };
 
-    let url = match reqwest::Url::parse(&cli.url) {
-        Ok(url) => url,
-        Err(error) => {
-            eprintln!("URL invalide : {error}");
-            return;
-        }
-    };
+    let url =
+        reqwest::Url::parse(&cli.url).map_err(|error| AppError::InvalidUrl(error.to_string()))?;
 
     let mut queries = Vec::new();
+
     for query in &cli.queries {
-        let (name, value) = match query.split_once('=') {
-            Some(pair) => pair,
-            None => {
-                eprintln!("Format attendu pour --query : nom=valeur");
-                return;
-            }
-        };
+        let (name, value) = query
+            .split_once('=')
+            .ok_or_else(|| AppError::InvalidQuery("Format attendu : nom=valeur".to_string()))?;
         if url
             .query_pairs()
             .any(|(existing_name, _)| existing_name == name)
         {
-            eprintln!("Paramètre déjà présent dans l'URL : {name}");
-            return;
+            return Err(AppError::InvalidQuery(format!(
+                "Paramètre déjà présent dans l'URL : {name}"
+            )));
         }
         queries.push((name.to_string(), value.to_string()));
     }
 
     let mut request = client.request(method, url);
-    
+
     for header in &cli.headers {
-        let (name, value) = match header.split_once(':') {
-            Some(pair) => pair,
-            None => {
-                eprintln!("Format attendu pour --header : Nom: valeur");
-                return;
-            }
-        };
+        let (name, value) = header
+            .split_once(':')
+            .ok_or_else(|| AppError::InvalidHeader("Format attendu : Nom: valeur".to_string()))?;
         request = request.header(name.trim(), value.trim());
 
         if cli.verbose {
@@ -95,59 +93,33 @@ async fn main()  {
             );
         }
     }
-    
+
     let body = match (cli.body.as_deref(), cli.body_file.as_deref()) {
-        (Some(_), Some(_)) => {
-            eprintln!("--body et --body-file ne peuvent pas être utilisés ensemble");
-            return;
-        }
-        
+        (Some(_), Some(_)) => return Err(AppError::ConflictingBodyOptions),
         (Some(body), None) => Some(body.to_owned()),
-        (None, Some(path)) => match std::fs::read_to_string(path) {
-            Ok(content) => Some(content),
-            Err(error) => {
-                eprintln!("Impossible de lire le fichier : {error}");
-                return;
-            }
-        },
+        (None, Some(path)) => Some(std::fs::read_to_string(path).map_err(AppError::FileRead)?),
         (None, None) => None,
     };
-    
+
     let is_json = cli.headers.iter().any(|header| {
         let Some((name, value)) = header.split_once(':') else {
             return false;
         };
-        let media_type = value
-            .split(';')
-            .next()
-            .unwrap_or("")
-            .trim();
+        let media_type = value.split(';').next().unwrap_or("").trim();
         name.trim().eq_ignore_ascii_case("content-type")
             && media_type.eq_ignore_ascii_case("application/json")
     });
 
     if let Some(body) = body.as_deref() {
         if is_json {
-            match serde_json::from_str::<serde_json::Value>(body) {
-                Ok(_) => {}
-                Err(error) => {
-                    eprintln!("JSON invalide : {error}");
-                    return;
-                }
-            }
+            serde_json::from_str::<serde_json::Value>(body).map_err(AppError::InvalidJson)?;
         }
         request = request.body(body.to_owned());
     }
-    
+
     request = request.query(&queries);
 
-    let response = match request.send().await {
-        Ok(response) => response,
-        Err(error) => {
-            eprintln!("Erreur réseau : {error}");
-            return;
-        }
-    };
+    let response = request.send().await.map_err(AppError::Network)?;
 
     if cli.verbose {
         for (name, value) in response.headers() {
@@ -161,13 +133,7 @@ async fn main()  {
     }
 
     let status = response.status();
-    let body = match response.text().await {
-        Ok(body) => body,
-        Err(error) => {
-            eprintln!("Impossible de lire la réponse : {error}");
-            return;
-        }
-    };
+    let body = response.text().await.map_err(AppError::ResponseBody)?;
     let finish = Instant::now();
     let duration = finish - start;
 
@@ -186,4 +152,6 @@ async fn main()  {
     if !body.is_empty() {
         println!("Body : {body}");
     }
+
+    Ok(())
 }

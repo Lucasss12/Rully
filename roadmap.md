@@ -68,8 +68,8 @@ into a reusable core shared by the CLI and the future TUI.
 ### Request Body
 
 - [x] Raw request body with `--body`
-- [~] JSON request body validation
-- [ ] Request body from a file with `--body-file`
+- [x] JSON request body validation
+- [x] Request body from a file with `--body-file`
 
 ---
 

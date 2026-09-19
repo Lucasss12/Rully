@@ -1,38 +1,5 @@
-use clap::{Parser, ValueEnum};
 use std::time::Instant;
-
-#[derive(Clone, Copy, Debug, ValueEnum, PartialEq)]
-enum Method {
-    #[value(name = "GET")]
-    Get,
-    #[value(name = "POST")]
-    Post,
-    #[value(name = "PUT")]
-    Put,
-    #[value(name = "PATCH")]
-    Patch,
-    #[value(name = "DELETE")]
-    Delete,
-}
-
-#[derive(Parser)]
-#[command(version, about)]
-struct Cli {
-    method: Method,
-    url: String,
-
-    #[arg(long = "header")]
-    headers: Vec<String>,
-
-    #[arg(long = "query")]
-    queries: Vec<String>,
-
-    #[arg(long = "body")]
-    body: Option<String>,
-
-    #[arg(short, long)]
-    verbose: bool,
-}
+mod cli;
 
 fn format_size(bytes: usize) -> String {
     let units = ["B", "KB", "MB", "GB"];
@@ -66,19 +33,19 @@ fn display_header_value(name: &str, value: &str) -> String {
 }
 
 #[tokio::main]
-async fn main() {
-    let cli = Cli::parse();
+async fn main()  {
+    let cli = cli::parse_args();
 
     let start = Instant::now();
 
     let client = reqwest::Client::new();
 
     let method = match cli.method {
-        Method::Get => reqwest::Method::GET,
-        Method::Post => reqwest::Method::POST,
-        Method::Put => reqwest::Method::PUT,
-        Method::Patch => reqwest::Method::PATCH,
-        Method::Delete => reqwest::Method::DELETE,
+        cli::Method::Get => reqwest::Method::GET,
+        cli::Method::Post => reqwest::Method::POST,
+        cli::Method::Put => reqwest::Method::PUT,
+        cli::Method::Patch => reqwest::Method::PATCH,
+        cli::Method::Delete => reqwest::Method::DELETE,
     };
 
     let url = match reqwest::Url::parse(&cli.url) {
@@ -109,6 +76,7 @@ async fn main() {
     }
 
     let mut request = client.request(method, url);
+    
     for header in &cli.headers {
         let (name, value) = match header.split_once(':') {
             Some(pair) => pair,
@@ -127,11 +95,50 @@ async fn main() {
             );
         }
     }
+    
+    let body = match (cli.body.as_deref(), cli.body_file.as_deref()) {
+        (Some(_), Some(_)) => {
+            eprintln!("--body et --body-file ne peuvent pas être utilisés ensemble");
+            return;
+        }
+        
+        (Some(body), None) => Some(body.to_owned()),
+        (None, Some(path)) => match std::fs::read_to_string(path) {
+            Ok(content) => Some(content),
+            Err(error) => {
+                eprintln!("Impossible de lire le fichier : {error}");
+                return;
+            }
+        },
+        (None, None) => None,
+    };
+    
+    let is_json = cli.headers.iter().any(|header| {
+        let Some((name, value)) = header.split_once(':') else {
+            return false;
+        };
+        let media_type = value
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim();
+        name.trim().eq_ignore_ascii_case("content-type")
+            && media_type.eq_ignore_ascii_case("application/json")
+    });
 
-    if let Some(body) = cli.body {
-        request = request.body(body)
+    if let Some(body) = body.as_deref() {
+        if is_json {
+            match serde_json::from_str::<serde_json::Value>(body) {
+                Ok(_) => {}
+                Err(error) => {
+                    eprintln!("JSON invalide : {error}");
+                    return;
+                }
+            }
+        }
+        request = request.body(body.to_owned());
     }
-
+    
     request = request.query(&queries);
 
     let response = match request.send().await {
@@ -178,99 +185,5 @@ async fn main() {
 
     if !body.is_empty() {
         println!("Body : {body}");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_arguments() {
-        let cli = Cli::parse_from(["rully", "GET", "https://example.com"]);
-        assert_eq!(cli.method, Method::Get);
-        assert_eq!(cli.url, "https://example.com");
-    }
-
-    #[test]
-    fn missing_argument_method() {
-        let result = Cli::try_parse_from(["rully", "https://example.com"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn missing_argument_url() {
-        let result = Cli::try_parse_from(["rully", "GET"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn extra_arguments() {
-        let result = Cli::try_parse_from(["rully", "GET", "https://example.com", ""]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn parse_all_methods() {
-        let methods = [
-            ("GET", Method::Get),
-            ("POST", Method::Post),
-            ("PUT", Method::Put),
-            ("PATCH", Method::Patch),
-            ("DELETE", Method::Delete),
-        ];
-        for (input, expected) in methods {
-            let cli = Cli::try_parse_from(["rully", input, "https://example.com"])
-                .expect("la méthode devrait être valide");
-            assert_eq!(cli.method, expected);
-        }
-    }
-
-    #[test]
-    fn no_headers_by_default() {
-        let cli = Cli::parse_from(["rully", "GET", "https://example.com"]);
-        assert!(cli.headers.is_empty());
-    }
-    #[test]
-    fn parse_one_header() {
-        let cli = Cli::parse_from([
-            "rully",
-            "GET",
-            "https://example.com",
-            "--header",
-            "Authorization: Bearer test-token",
-        ]);
-        assert_eq!(cli.headers, vec!["Authorization: Bearer test-token"]);
-    }
-    #[test]
-    fn parse_multiple_headers() {
-        let cli = Cli::parse_from([
-            "rully",
-            "GET",
-            "https://example.com",
-            "--header",
-            "Authorization: Bearer test-token",
-            "--header",
-            "Content-Type: application/json",
-        ]);
-        assert_eq!(
-            cli.headers,
-            vec![
-                "Authorization: Bearer test-token",
-                "Content-Type: application/json",
-            ]
-        );
-    }
-
-    #[test]
-    fn verbose_is_disabled_by_default() {
-        let cli = Cli::parse_from(["rully", "GET", "https://example.com"]);
-        assert!(!cli.verbose);
-    }
-
-    #[test]
-    fn parse_verbose_flag() {
-        let cli = Cli::parse_from(["rully", "GET", "https://example.com", "--verbose"]);
-        assert!(cli.verbose);
     }
 }

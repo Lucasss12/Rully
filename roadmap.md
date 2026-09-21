@@ -85,7 +85,7 @@ into a reusable core shared by the CLI and the future TUI.
 - [x] Display response headers in verbose mode
 - [ ] Display the `Content-Type` in the summary
 - [ ] Pretty-print JSON responses
-- [ ] Preserve raw output for other content types
+- [x] Preserve raw output for other content types
 - [ ] Improve Clap help and error messages
 
 Example:
@@ -104,14 +104,14 @@ Example:
 
 **Goal:** provide clear errors and consistent exit codes.
 
-- [ ] Create an application error type
-- [ ] Distinguish CLI, URL, network, and response errors
-- [ ] Handle invalid URLs
-- [ ] Handle DNS and connection failures
+- [x] Create an application error type
+- [~] Distinguish CLI, URL, network, and response errors
+- [x] Handle invalid URLs
+- [x] Handle DNS and connection failures
 - [ ] Handle timeouts
-- [ ] Handle invalid request bodies
-- [ ] Handle missing files
-- [ ] Return a non-zero exit code on failure
+- [x] Handle invalid request bodies
+- [x] Handle missing files
+- [x] Return a non-zero exit code on failure
 - [ ] Avoid exposing unnecessary implementation details
 
 ---
@@ -120,14 +120,14 @@ Example:
 
 **Goal:** separate the HTTP engine from the CLI so it can be reused by the TUI.
 
-- [ ] Extract CLI parsing from `main.rs`
-- [ ] Extract HTTP request execution
+- [x] Extract CLI parsing from `main.rs`
+- [x] Extract HTTP request execution
 - [ ] Create `Request` and `Response` models
-- [ ] Preserve status, headers, body, size, and duration
-- [ ] Return structured errors
-- [ ] Keep terminal output out of the core
+- [~] Preserve status, headers, body, size, and duration
+- [x] Return structured errors
+- [x] Keep terminal output out of the core
 - [ ] Keep the core independent from Clap and Ratatui
-- [ ] Reduce `main.rs` to application orchestration
+- [x] Reduce `main.rs` to application orchestration
 
 Target initial structure:
 
@@ -150,9 +150,9 @@ src/
 - [ ] Add a README
 - [ ] Document installation
 - [ ] Document usage examples
-- [ ] Pass `cargo fmt`
-- [ ] Pass `cargo clippy -- -D warnings`
-- [ ] Pass `cargo test`
+- [~] Pass `cargo fmt`
+- [~] Pass `cargo clippy -- -D warnings`
+- [~] Pass `cargo test`
 
 The MVP should provide:
 

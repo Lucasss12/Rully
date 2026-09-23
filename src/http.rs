@@ -74,7 +74,11 @@ fn build_request(cli: &cli::Cli) -> Result<reqwest::RequestBuilder, AppError> {
 
 pub(crate) async fn execute(cli: &cli::Cli) -> Result<reqwest::Response, AppError> {
     let request = build_request(cli)?;
-    let response = request.send().await.map_err(AppError::Network)?;
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(error) if error.is_timeout() => return Err(AppError::Timeout),
+        Err(error) => return Err(AppError::Network(error.to_string())),
+    };
 
     Ok(response)
 }

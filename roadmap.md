@@ -105,14 +105,14 @@ Example:
 **Goal:** provide clear errors and consistent exit codes.
 
 - [x] Create an application error type
-- [~] Distinguish CLI, URL, network, and response errors
+- [x] Distinguish CLI, URL, network, and response errors
 - [x] Handle invalid URLs
 - [x] Handle DNS and connection failures
-- [ ] Handle timeouts
+- [x] Handle timeouts
 - [x] Handle invalid request bodies
 - [x] Handle missing files
 - [x] Return a non-zero exit code on failure
-- [ ] Avoid exposing unnecessary implementation details
+- [x] Avoid exposing unnecessary implementation details
 
 ---
 

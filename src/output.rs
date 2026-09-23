@@ -11,7 +11,7 @@ fn content_type(headers: &reqwest::header::HeaderMap) -> Option<&str> {
 
 fn pretty_print_json(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
-    Some(serde_json::to_string_pretty(&value).ok()?)
+    serde_json::to_string_pretty(&value).ok()
 }
 
 fn format_size(bytes: usize) -> String {
@@ -68,23 +68,37 @@ fn display_response_headers(headers: &reqwest::header::HeaderMap) {
     }
 }
 
-fn display_summary(status: &reqwest::StatusCode, body: &str, duration_ms: f64, content_type: Option<&str>,) {
+fn display_summary(
+    status: &reqwest::StatusCode,
+    body: &str,
+    duration_ms: f64,
+    content_type: Option<&str>,
+) {
     println!("---");
     match content_type {
-        Some(ct) => println!("← {} · {:.2}ms · {} · {ct}", status, duration_ms, format_size(body.len())),
-        None => println!("← {} · {:.2}ms · {}", status, duration_ms, format_size(body.len())),
+        Some(ct) => println!(
+            "← {} · {:.2}ms · {} · {ct}",
+            status,
+            duration_ms,
+            format_size(body.len())
+        ),
+        None => println!(
+            "← {} · {:.2}ms · {}",
+            status,
+            duration_ms,
+            format_size(body.len())
+        ),
     }
     println!("---");
-    
 }
 
 fn display_body(body: &str, content_type: Option<&str>) {
     println!("Body:");
-    if content_type == Some("application/json") {
-        if let Some(pretty) = pretty_print_json(body) {
-            println!("{pretty}");
-            return;
-        }
+    if content_type == Some("application/json")
+        && let Some(pretty) = pretty_print_json(body)
+    {
+        println!("{pretty}");
+        return;
     }
     println!("{body}");
 }

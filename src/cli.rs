@@ -14,24 +14,38 @@ pub(crate) enum Method {
     Delete,
 }
 
+/// Rully, a terminal-first HTTP client for the command line.
+///
+/// Send HTTP requests and inspect the response directly in the terminal.
 #[derive(Parser)]
-#[command(version, about)]
+#[command(
+    version,
+    about,
+)]
 pub(crate) struct Cli {
+    /// HTTP method to use for the request.
     pub(crate) method: Method,
+
+    /// Target URL of the request.
     pub(crate) url: String,
 
-    #[arg(long = "header")]
+    /// Set a request header as `Name: value`. Can be repeated.
+    #[arg(long = "header", value_name = "NAME: VALUE")]
     pub(crate) headers: Vec<String>,
 
-    #[arg(long = "query")]
+    /// Add a query parameter as `name=value`. Can be repeated.
+    #[arg(long = "query", value_name = "NAME=VALUE")]
     pub(crate) queries: Vec<String>,
 
-    #[arg(long = "body")]
+    /// Send a raw request body as a string.
+    #[arg(long)]
     pub(crate) body: Option<String>,
 
-    #[arg(long = "body-file")]
+    /// Read the request body from a file.
+    #[arg(long, value_name = "PATH")]
     pub(crate) body_file: Option<String>,
 
+    /// Print verbose output with request and response headers.
     #[arg(short, long)]
     pub(crate) verbose: bool,
 }

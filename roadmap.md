@@ -86,7 +86,7 @@ into a reusable core shared by the CLI and the future TUI.
 - [x] Display the `Content-Type` in the summary
 - [x] Pretty-print JSON responses
 - [x] Preserve raw output for other content types
-- [ ] Improve Clap help and error messages
+- [x] Improve Clap help and error messages
 
 Example:
 

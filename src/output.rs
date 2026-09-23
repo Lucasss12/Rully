@@ -1,4 +1,18 @@
 use crate::cli::Cli;
+use reqwest::header::CONTENT_TYPE;
+
+fn content_type(headers: &reqwest::header::HeaderMap) -> Option<&str> {
+    headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(';').next().unwrap_or("").trim())
+        .filter(|value| !value.is_empty())
+}
+
+fn pretty_print_json(body: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    Some(serde_json::to_string_pretty(&value).ok()?)
+}
 
 fn format_size(bytes: usize) -> String {
     let units = ["B", "KB", "MB", "GB"];
@@ -54,6 +68,27 @@ fn display_response_headers(headers: &reqwest::header::HeaderMap) {
     }
 }
 
+fn display_summary(status: &reqwest::StatusCode, body: &str, duration_ms: f64, content_type: Option<&str>,) {
+    println!("---");
+    match content_type {
+        Some(ct) => println!("← {} · {:.2}ms · {} · {ct}", status, duration_ms, format_size(body.len())),
+        None => println!("← {} · {:.2}ms · {}", status, duration_ms, format_size(body.len())),
+    }
+    println!("---");
+    
+}
+
+fn display_body(body: &str, content_type: Option<&str>) {
+    println!("Body:");
+    if content_type == Some("application/json") {
+        if let Some(pretty) = pretty_print_json(body) {
+            println!("{pretty}");
+            return;
+        }
+    }
+    println!("{body}");
+}
+
 pub(crate) fn display_response(
     status: &reqwest::StatusCode,
     response_headers: &reqwest::header::HeaderMap,
@@ -65,30 +100,15 @@ pub(crate) fn display_response(
         display_request_headers(cli);
     }
 
-    display_summary(status, body, cli, duration_ms);
+    let content_type = content_type(response_headers);
+
+    display_summary(status, body, duration_ms, content_type);
 
     if cli.verbose {
         display_response_headers(response_headers);
     }
 
     if !body.is_empty() {
-        display_body(body);
+        display_body(body, content_type);
     }
-}
-
-fn display_summary(status: &reqwest::StatusCode, body: &str, cli: &Cli, duration_ms: f64) {
-    println!("---");
-    println!("→ {:?} {:?}", cli.method, cli.url);
-    println!(
-        "← {} · {:.2}ms · {}",
-        status,
-        duration_ms,
-        format_size(body.len())
-    );
-    println!("---");
-}
-
-fn display_body(body: &str) {
-    println!("Body:");
-    println!("{body}");
 }

@@ -83,8 +83,8 @@ into a reusable core shared by the CLI and the future TUI.
 - [x] Add verbose mode
 - [x] Display request headers in verbose mode
 - [x] Display response headers in verbose mode
-- [ ] Display the `Content-Type` in the summary
-- [ ] Pretty-print JSON responses
+- [x] Display the `Content-Type` in the summary
+- [x] Pretty-print JSON responses
 - [x] Preserve raw output for other content types
 - [ ] Improve Clap help and error messages
 

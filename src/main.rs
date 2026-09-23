@@ -3,6 +3,7 @@ mod cli;
 mod errors;
 mod http;
 mod output;
+mod style;
 use errors::AppError;
 
 #[tokio::main]

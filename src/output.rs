@@ -1,4 +1,5 @@
 use crate::cli::Cli;
+use crate::style;
 use reqwest::header::CONTENT_TYPE;
 
 fn content_type(headers: &reqwest::header::HeaderMap) -> Option<&str> {
@@ -53,7 +54,11 @@ fn display_request_headers(cli: &Cli) {
 
         let name = name.trim();
         let value = value.trim();
-        println!("→ Header: {}: {}", name, display_header_value(name, value));
+        println!(
+            "→ Header: {}: {}",
+            style::yellow(name),
+            display_header_value(name, value)
+        );
     }
 }
 
@@ -62,9 +67,18 @@ fn display_response_headers(headers: &reqwest::header::HeaderMap) {
         let value = value.to_str().unwrap_or("[non-UTF8]");
         println!(
             "← Header: {}: {}",
-            name,
+            style::cyan(name.as_ref()),
             display_header_value(name.as_str(), value)
         );
+    }
+}
+
+fn style_status(status: &reqwest::StatusCode) -> String {
+    let code = status.to_string();
+    match status.as_u16() {
+        200..=299 => style::green(&code),
+        300..=399 => style::yellow(&code),
+        _ => style::red(&code),
     }
 }
 
@@ -77,14 +91,15 @@ fn display_summary(
     println!("---");
     match content_type {
         Some(ct) => println!(
-            "← {} · {:.2}ms · {} · {ct}",
-            status,
+            "← {} · {:.2}ms · {} · {}",
+            style_status(status),
             duration_ms,
-            format_size(body.len())
+            format_size(body.len()),
+            style::cyan(ct)
         ),
         None => println!(
             "← {} · {:.2}ms · {}",
-            status,
+            style_status(status),
             duration_ms,
             format_size(body.len())
         ),

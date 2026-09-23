@@ -18,10 +18,7 @@ pub(crate) enum Method {
 ///
 /// Send HTTP requests and inspect the response directly in the terminal.
 #[derive(Parser)]
-#[command(
-    version,
-    about,
-)]
+#[command(version, about)]
 pub(crate) struct Cli {
     /// HTTP method to use for the request.
     pub(crate) method: Method,

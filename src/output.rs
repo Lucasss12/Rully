@@ -1,14 +1,8 @@
-use crate::cli::Cli;
+use crate::request::Request;
+use crate::response::Response;
 use crate::style;
-use reqwest::header::CONTENT_TYPE;
-
-fn content_type(headers: &reqwest::header::HeaderMap) -> Option<&str> {
-    headers
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.split(';').next().unwrap_or("").trim())
-        .filter(|value| !value.is_empty())
-}
+use reqwest::StatusCode;
+use reqwest::header::HeaderMap;
 
 fn pretty_print_json(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
@@ -46,23 +40,19 @@ fn display_header_value(name: &str, value: &str) -> String {
     }
 }
 
-fn display_request_headers(cli: &Cli) {
-    for header in &cli.headers {
-        let Some((name, value)) = header.split_once(':') else {
-            continue;
-        };
+fn display_request_headers(request: &Request) {
+    for (name, value) in &request.headers {
+        let value = value.to_str().unwrap_or("[non-UTF8]");
 
-        let name = name.trim();
-        let value = value.trim();
         println!(
             "→ Header: {}: {}",
-            style::yellow(name),
-            display_header_value(name, value)
+            style::yellow(name.as_ref()),
+            display_header_value(name.as_str(), value)
         );
     }
 }
 
-fn display_response_headers(headers: &reqwest::header::HeaderMap) {
+fn display_response_headers(headers: &HeaderMap) {
     for (name, value) in headers {
         let value = value.to_str().unwrap_or("[non-UTF8]");
         println!(
@@ -73,7 +63,7 @@ fn display_response_headers(headers: &reqwest::header::HeaderMap) {
     }
 }
 
-fn style_status(status: &reqwest::StatusCode) -> String {
+fn style_status(status: &StatusCode) -> String {
     let code = status.to_string();
     match status.as_u16() {
         200..=299 => style::green(&code),
@@ -82,62 +72,55 @@ fn style_status(status: &reqwest::StatusCode) -> String {
     }
 }
 
-fn display_summary(
-    status: &reqwest::StatusCode,
-    body: &str,
-    duration_ms: f64,
-    content_type: Option<&str>,
-) {
+fn display_summary(response: &Response) {
     println!("---");
-    match content_type {
-        Some(ct) => println!(
+
+    match response.content_type() {
+        Some(content_type) => println!(
             "← {} · {:.2}ms · {} · {}",
-            style_status(status),
-            duration_ms,
-            format_size(body.len()),
-            style::cyan(ct)
+            style_status(&response.status),
+            response.duration_ms(),
+            format_size(response.size),
+            style::cyan(content_type)
         ),
         None => println!(
             "← {} · {:.2}ms · {}",
-            style_status(status),
-            duration_ms,
-            format_size(body.len())
+            style_status(&response.status),
+            response.duration_ms(),
+            format_size(response.size)
         ),
     }
+
     println!("---");
 }
 
 fn display_body(body: &str, content_type: Option<&str>) {
     println!("Body:");
+
     if content_type == Some("application/json")
         && let Some(pretty) = pretty_print_json(body)
     {
         println!("{pretty}");
         return;
     }
+
     println!("{body}");
 }
 
-pub(crate) fn display_response(
-    status: &reqwest::StatusCode,
-    response_headers: &reqwest::header::HeaderMap,
-    body: &str,
-    cli: &Cli,
-    duration_ms: f64,
-) {
-    if cli.verbose {
-        display_request_headers(cli);
+pub(crate) fn display_response(response: &Response, request: &Request, verbose: bool) {
+    if verbose {
+        display_request_headers(request);
     }
 
-    let content_type = content_type(response_headers);
+    let content_type = response.content_type();
 
-    display_summary(status, body, duration_ms, content_type);
+    display_summary(response);
 
-    if cli.verbose {
-        display_response_headers(response_headers);
+    if verbose {
+        display_response_headers(&response.headers);
     }
 
-    if !body.is_empty() {
-        display_body(body, content_type);
+    if !response.body.is_empty() {
+        display_body(&response.body, content_type);
     }
 }

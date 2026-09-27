@@ -20,7 +20,8 @@ async fn main() {
 async fn run() -> Result<(), AppError> {
     let cli = cli::parse_args();
     let request = Request::try_from(&cli)?;
-    let response = http::execute(&request).await?;
+    let client = http::default_client()?;
+    let response = http::execute(&client, &request).await?;
     output::display_response(&response, &request, cli.verbose);
 
     Ok(())

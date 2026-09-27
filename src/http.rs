@@ -1,11 +1,20 @@
 use crate::errors::AppError;
 use crate::request::Request;
 use crate::response::Response;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-fn build_request(request: &Request) -> reqwest::RequestBuilder {
-    let client = reqwest::Client::new();
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
+pub fn default_client() -> Result<reqwest::Client, AppError> {
+    reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
+        .build()
+        .map_err(|error| AppError::ClientBuild(error.to_string()))
+}
+
+fn build_request(client: &reqwest::Client, request: &Request) -> reqwest::RequestBuilder {
     let mut builder = client.request(request.method.clone(), request.url.clone());
 
     builder = builder.headers(request.headers.clone());
@@ -17,10 +26,10 @@ fn build_request(request: &Request) -> reqwest::RequestBuilder {
     builder
 }
 
-pub async fn execute(request: &Request) -> Result<Response, AppError> {
+pub async fn execute(client: &reqwest::Client, request: &Request) -> Result<Response, AppError> {
     request.validate_json_body()?;
 
-    let builder = build_request(request);
+    let builder = build_request(client, request);
     let start = Instant::now();
 
     let raw = match builder.send().await {

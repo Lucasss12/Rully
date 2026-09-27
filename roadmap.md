@@ -88,16 +88,6 @@ into a reusable core shared by the CLI and the future TUI.
 - [x] Preserve raw output for other content types
 - [x] Improve Clap help and error messages
 
-Example:
-
-```text
-<- 200 OK - 142ms - 1.2 KB - application/json
-
-{
-  "users": []
-}
-```
-
 ---
 
 ## Phase 4 - Reliable Errors
@@ -122,23 +112,12 @@ Example:
 
 - [x] Extract CLI parsing from `main.rs`
 - [x] Extract HTTP request execution
-- [ ] Create `Request` and `Response` models
-- [~] Preserve status, headers, body, size, and duration
+- [x] Create `Request` and `Response` models
+- [x] Preserve status, headers, body, size, and duration
 - [x] Return structured errors
 - [x] Keep terminal output out of the core
-- [ ] Keep the core independent from Clap and Ratatui
+- [x] Keep the core independent from Clap and Ratatui
 - [x] Reduce `main.rs` to application orchestration
-
-Target initial structure:
-
-```text
-src/
-├── main.rs
-├── cli.rs
-├── http.rs
-├── output.rs
-└── error.rs
-```
 
 ---
 

@@ -17,7 +17,7 @@ fn build_request(request: &Request) -> reqwest::RequestBuilder {
     builder
 }
 
-pub(crate) async fn execute(request: &Request) -> Result<Response, AppError> {
+pub async fn execute(request: &Request) -> Result<Response, AppError> {
     request.validate_json_body()?;
 
     let builder = build_request(request);

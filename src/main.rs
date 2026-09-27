@@ -1,13 +1,10 @@
 mod cli;
-mod errors;
-mod http;
 mod output;
-mod request;
-mod response;
 mod style;
-use errors::AppError;
-use errors::ErrorCategory;
-use request::Request;
+use rully_core::errors::AppError;
+use rully_core::errors::ErrorCategory;
+use rully_core::http;
+use rully_core::request::Request;
 
 #[tokio::main]
 async fn main() {

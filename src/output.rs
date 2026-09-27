@@ -1,8 +1,8 @@
-use crate::request::Request;
-use crate::response::Response;
 use crate::style;
 use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
+use rully_core::request::Request;
+use rully_core::response::Response;
 
 fn pretty_print_json(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;

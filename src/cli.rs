@@ -1,7 +1,7 @@
-use crate::errors::AppError;
-use crate::request::Request;
 use clap::{Parser, ValueEnum};
 use reqwest::header::{HeaderName, HeaderValue};
+use rully_core::errors::AppError;
+use rully_core::request::Request;
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq)]
 pub(crate) enum Method {

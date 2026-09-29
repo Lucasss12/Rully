@@ -64,6 +64,15 @@ fn header_lines(headers: &HeaderMap, arrow: &str, paint: fn(&str) -> String) -> 
         .collect()
 }
 
+fn request_line(request: &Request) -> String {
+    let target = match request.url.query() {
+        Some(query) => format!("{}?{query}", request.url.path()),
+        None => request.url.path().to_string(),
+    };
+
+    format!("{} {target} HTTP/1.1", request.method)
+}
+
 fn request_header_lines(headers: &HeaderMap) -> Vec<String> {
     header_lines(headers, "→", style::yellow)
 }
@@ -101,25 +110,21 @@ fn style_status(status: &StatusCode) -> String {
 }
 
 fn display_summary(response: &Response) {
-    println!("---");
-
     match response.content_type() {
         Some(content_type) => println!(
-            "← {} · {:.2}ms · {} · {}",
+            "← {} · {:.2}ms · {} · {}\n",
             style_status(&response.status),
             response.duration_ms(),
             format_size(response.size),
             style::cyan(content_type)
         ),
         None => println!(
-            "← {} · {:.2}ms · {}",
+            "← {} · {:.2}ms · {}\n",
             style_status(&response.status),
             response.duration_ms(),
             format_size(response.size)
         ),
     }
-
-    println!("---");
 }
 
 fn display_body(body: &str, content_type: Option<&str>) {
@@ -135,6 +140,10 @@ fn display_body(body: &str, content_type: Option<&str>) {
     println!("{body}");
 }
 
+fn display_request_line(request: &Request) {
+    println!("{}\n", request_line(request));
+}
+
 fn display_request_headers(request: &Request) {
     for line in request_header_lines(&request.headers)
         .into_iter()
@@ -142,20 +151,21 @@ fn display_request_headers(request: &Request) {
     {
         println!("{line}");
     }
+    println!("");
 }
 
 fn display_response_headers(headers: &HeaderMap) {
     for line in response_header_lines(headers) {
         println!("{line}");
     }
+    println!("");
 }
 
 pub(crate) fn display_response(response: &Response, request: &Request, verbose: bool) {
     if verbose {
+        display_request_line(request);
         display_request_headers(request);
     }
-
-    let content_type = response.content_type();
 
     display_summary(response);
 
@@ -164,7 +174,7 @@ pub(crate) fn display_response(response: &Response, request: &Request, verbose: 
     }
 
     if !response.body.is_empty() {
-        display_body(&response.body, content_type);
+        display_body(&response.body, response.content_type());
     }
 }
 
@@ -394,6 +404,38 @@ mod tests {
 
         assert_eq!(own.len(), 4);
         assert!(added.is_empty(), "nothing left to add, got {added:?}");
+    }
+
+    #[test]
+    fn renders_the_request_line_with_the_method_and_path() {
+        let request = Request::new(reqwest::Method::POST, "https://example.com/users").unwrap();
+
+        assert_eq!(request_line(&request), "POST /users HTTP/1.1");
+    }
+
+    #[test]
+    fn keeps_the_query_in_the_request_line() {
+        let request = Request::new(
+            reqwest::Method::GET,
+            "https://example.com/search?q=rust&page=2",
+        )
+        .unwrap();
+
+        assert_eq!(request_line(&request), "GET /search?q=rust&page=2 HTTP/1.1");
+    }
+
+    #[test]
+    fn uses_a_root_path_when_the_url_has_none() {
+        let request = Request::new(reqwest::Method::GET, "https://example.com").unwrap();
+
+        assert_eq!(request_line(&request), "GET / HTTP/1.1");
+    }
+
+    #[test]
+    fn leaves_the_fragment_out_of_the_request_line() {
+        let request = Request::new(reqwest::Method::GET, "https://example.com/users#top").unwrap();
+
+        assert_eq!(request_line(&request), "GET /users HTTP/1.1");
     }
 
     #[test]

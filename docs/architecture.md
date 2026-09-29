@@ -87,7 +87,7 @@ argv
                         ▼
 ┌────────────────────────────────────────────────────┐
 │ output.rs       terminal adapter (stdout)          │
-│                 verbose → request headers          │
+│                 verbose → request line + headers    │
 │                 summary  → status·time·size·ct     │
 │                 verbose → response headers         │
 │                 body    → pretty JSON if ct=json   │

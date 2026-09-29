@@ -11,7 +11,7 @@ pub struct TestServer {
 }
 
 impl TestServer {
-    pub async fn start(responses: Vec<&'static str>) -> Self {
+    pub async fn start(responses: Vec<Vec<u8>>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let (sender, requests) = mpsc::unbounded_channel();
@@ -26,7 +26,7 @@ impl TestServer {
                 let read = socket.read(&mut buffer).await.unwrap_or(0);
                 let _ = sender.send(String::from_utf8_lossy(&buffer[..read]).into_owned());
 
-                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.write_all(&response).await;
                 let _ = socket.shutdown().await;
             }
         });

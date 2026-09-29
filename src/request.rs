@@ -42,6 +42,14 @@ impl Request {
 
         Ok(())
     }
+
+    pub fn host_header(&self) -> String {
+        self.url.authority().to_string()
+    }
+
+    pub fn content_length_header(&self) -> Option<usize> {
+        self.body.as_ref().map(|body| body.len())
+    }
 }
 
 #[cfg(test)]
@@ -143,5 +151,34 @@ mod tests {
         let request = json_request();
 
         assert!(request.validate_json_body().is_ok());
+    }
+
+    #[test]
+    fn reads_the_host_from_the_url() {
+        let request = Request::new(Method::GET, "https://api.example.com/users").unwrap();
+
+        assert_eq!(request.host_header(), "api.example.com");
+    }
+
+    #[test]
+    fn keeps_the_port_in_the_host_when_it_is_not_the_default_one() {
+        let request = Request::new(Method::GET, "http://127.0.0.1:8080/users").unwrap();
+
+        assert_eq!(request.host_header(), "127.0.0.1:8080");
+    }
+
+    #[test]
+    fn has_no_content_length_without_a_body() {
+        let request = Request::new(Method::GET, "https://example.com").unwrap();
+
+        assert_eq!(request.content_length_header(), None);
+    }
+
+    #[test]
+    fn counts_content_length_in_bytes() {
+        let mut request = Request::new(Method::POST, "https://example.com").unwrap();
+        request.body = Some("héllo".to_string());
+
+        assert_eq!(request.content_length_header(), Some(6));
     }
 }

@@ -1,15 +1,28 @@
 use crate::errors::AppError;
 use crate::request::Request;
 use crate::response::Response;
+use reqwest::header::{ACCEPT, ACCEPT_ENCODING, HeaderMap, HeaderValue, USER_AGENT};
 use std::time::{Duration, Instant};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+
+pub fn default_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+
+    headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
+    headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip"));
+    headers.insert(USER_AGENT, HeaderValue::from_static(DEFAULT_USER_AGENT));
+
+    headers
+}
 
 pub fn default_client() -> Result<reqwest::Client, AppError> {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
         .read_timeout(READ_TIMEOUT)
+        .default_headers(default_headers())
         .build()
         .map_err(|error| AppError::ClientBuild(error.to_string()))
 }

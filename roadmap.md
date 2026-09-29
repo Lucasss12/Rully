@@ -123,15 +123,15 @@ into a reusable core shared by the CLI and the future TUI.
 
 ## Phase 6 - Quality and MVP
 
-- [ ] Add HTTP integration tests
-- [ ] Test requests and responses with a local server
-- [ ] Test the main error cases
+- [x] Add HTTP integration tests
+- [x] Test requests and responses with a local server
+- [x] Test the main error cases
 - [ ] Add a README
 - [ ] Document installation
 - [ ] Document usage examples
-- [~] Pass `cargo fmt`
-- [~] Pass `cargo clippy -- -D warnings`
-- [~] Pass `cargo test`
+- [x] Pass `cargo fmt`
+- [x] Pass `cargo clippy -- -D warnings`
+- [x] Pass `cargo test`
 
 The MVP should provide:
 
@@ -139,8 +139,8 @@ The MVP should provide:
 - [x] Custom headers
 - [x] Request bodies
 - [x] Status and response time
-- [~] Basic JSON formatting
-- [~] Clear basic error handling
+- [x] Basic JSON formatting
+- [x] Clear basic error handling
 
 ---
 

@@ -9,11 +9,13 @@ See [ROADMAP.md](./roadmap.md) for the planned features and project phases.
 ## Commands
 
 ```sh
-cargo build        # build
-cargo run          # run
-cargo test         # run tests
-cargo clippy -- -D warnings  # lint (warnings = errors)
-cargo fmt          # format
+cargo build                       # build
+cargo run                         # run
+cargo test                        # run all tests
+cargo test --test http            # run only the integration tests
+cargo test --test http NAME       # run a single integration test
+cargo clippy --all-targets -- -D warnings  # lint (warnings = errors)
+cargo fmt                         # format
 ```
 
 ## Commit Convention

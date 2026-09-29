@@ -43,34 +43,34 @@ impl std::fmt::Display for AppError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             AppError::ClientBuild(message) => {
-                write!(formatter, "Erreur client HTTP : {message}")
+                write!(formatter, "HTTP client error: {message}")
             }
             AppError::InvalidUrl(message) => {
-                write!(formatter, "URL invalide : {message}")
+                write!(formatter, "Invalid URL: {message}")
             }
             AppError::InvalidQuery(message) => {
-                write!(formatter, "Requête invalide : {message}")
+                write!(formatter, "Invalid query: {message}")
             }
             AppError::InvalidHeader(message) => {
-                write!(formatter, "En-tête invalide : {message}")
+                write!(formatter, "Invalid header: {message}")
             }
             AppError::ConflictingBodyOptions => {
-                write!(formatter, "Options de corps en conflit")
+                write!(formatter, "Conflicting body options")
             }
             AppError::FileRead(error) => {
-                write!(formatter, "Impossible de lire le fichier : {error}")
+                write!(formatter, "Could not read file: {error}")
             }
             AppError::InvalidJson(error) => {
-                write!(formatter, "JSON invalide : {error}")
+                write!(formatter, "Invalid JSON: {error}")
             }
             AppError::Network(error) => {
-                write!(formatter, "Erreur réseau : {error}")
+                write!(formatter, "Network error: {error}")
             }
             AppError::Timeout => {
-                write!(formatter, "Délai de la requête dépassé")
+                write!(formatter, "Request timed out")
             }
             AppError::ResponseBody(error) => {
-                write!(formatter, "Erreur de corps de réponse : {error}")
+                write!(formatter, "Response body error: {error}")
             }
         }
     }
@@ -102,11 +102,11 @@ mod tests {
 
     #[test]
     fn formats_client_build_failure() {
-        let error = AppError::ClientBuild("backend TLS indisponible".to_string());
+        let error = AppError::ClientBuild("TLS backend unavailable".to_string());
 
         assert_eq!(
             error.to_string(),
-            "Erreur client HTTP : backend TLS indisponible"
+            "HTTP client error: TLS backend unavailable"
         );
     }
 }

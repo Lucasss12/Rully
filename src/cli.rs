@@ -86,7 +86,7 @@ fn add_query(request: &mut Request, queries: &[String]) -> Result<(), AppError> 
     for query in queries {
         let (name, value) = query
             .split_once('=')
-            .ok_or_else(|| AppError::InvalidQuery("Format attendu : nom=valeur".to_string()))?;
+            .ok_or_else(|| AppError::InvalidQuery("Expected format: name=value".to_string()))?;
 
         let already_used = request
             .url
@@ -96,7 +96,7 @@ fn add_query(request: &mut Request, queries: &[String]) -> Result<(), AppError> 
 
         if already_used {
             return Err(AppError::InvalidQuery(format!(
-                "Paramètre déjà présent : {name}"
+                "Parameter already present: {name}"
             )));
         }
 
@@ -116,14 +116,14 @@ fn add_headers(request: &mut Request, headers: &[String]) -> Result<(), AppError
     for header in headers {
         let (name, value) = header
             .split_once(':')
-            .ok_or_else(|| AppError::InvalidHeader("Format attendu : Nom: valeur".to_string()))?;
+            .ok_or_else(|| AppError::InvalidHeader("Expected format: Name: value".to_string()))?;
 
         let name = HeaderName::from_bytes(name.trim().as_bytes()).map_err(|_| {
-            AppError::InvalidHeader(format!("Nom d'en-tête invalide : {}", name.trim()))
+            AppError::InvalidHeader(format!("Invalid header name: {}", name.trim()))
         })?;
 
         let value = HeaderValue::from_str(value.trim())
-            .map_err(|_| AppError::InvalidHeader(format!("Valeur d'en-tête invalide : {name}")))?;
+            .map_err(|_| AppError::InvalidHeader(format!("Invalid header value: {name}")))?;
 
         request.headers.append(name, value);
     }

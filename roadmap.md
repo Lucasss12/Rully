@@ -126,9 +126,9 @@ into a reusable core shared by the CLI and the future TUI.
 - [x] Add HTTP integration tests
 - [x] Test requests and responses with a local server
 - [x] Test the main error cases
-- [ ] Add a README
-- [ ] Document installation
-- [ ] Document usage examples
+- [-] Add a README
+- [-] Document installation
+- [-] Document usage examples
 - [x] Pass `cargo fmt`
 - [x] Pass `cargo clippy -- -D warnings`
 - [x] Pass `cargo test`

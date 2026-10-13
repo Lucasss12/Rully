@@ -1,3 +1,7 @@
+//! Shared test server. Each test binary compiles this module separately, so a
+//! helper used by only one of them looks dead to the other.
+#![allow(dead_code)]
+
 use std::future::pending;
 use std::net::SocketAddr;
 use std::time::Duration;

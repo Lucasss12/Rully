@@ -1,4 +1,4 @@
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use reqwest::header::{HeaderName, HeaderValue};
 use rully_core::errors::AppError;
 use rully_core::request::Request;
@@ -17,17 +17,56 @@ pub(crate) enum Method {
     Delete,
 }
 
+#[derive(Debug, PartialEq, Subcommand)]
+pub(crate) enum Command {
+    /// Create the workspace in the current directory.
+    Init,
+
+    /// Create a collection, or a request inside an existing collection.
+    New {
+        /// Collection name, or `collection/request.http` for a request.
+        name: String,
+    },
+
+    /// List collections, or the requests of a collection.
+    List {
+        /// List the requests of this collection instead.
+        collection: Option<String>,
+    },
+
+    /// Execute a saved request.
+    Run {
+        /// Path of the request, relative to the collections directory.
+        path: String,
+    },
+
+    /// Edit a saved request in your editor.
+    Edit {
+        /// Path of the request, relative to the collections directory.
+        path: String,
+    },
+
+    /// Delete a saved request.
+    Delete {
+        /// Path of the request, relative to the collections directory.
+        path: String,
+    },
+}
+
 /// Rully, a terminal-first HTTP client for the command line.
 ///
 /// Send HTTP requests and inspect the response directly in the terminal.
 #[derive(Parser)]
 #[command(version, about)]
 pub(crate) struct Cli {
+    #[command(subcommand)]
+    pub(crate) command: Option<Command>,
+
     /// HTTP method to use for the request.
-    pub(crate) method: Method,
+    pub(crate) method: Option<Method>,
 
     /// Target URL of the request.
-    pub(crate) url: String,
+    pub(crate) url: Option<String>,
 
     /// Set a request header as `Name: value`. Can be repeated.
     #[arg(long = "header", value_name = "NAME: VALUE")]
@@ -48,10 +87,34 @@ pub(crate) struct Cli {
     /// Print verbose output with request and response headers.
     #[arg(short, long)]
     pub(crate) verbose: bool,
+
+    /// Save the request to the collections directory before sending it.
+    #[arg(long, value_name = "COLLECTION/NAME")]
+    pub(crate) save: Option<String>,
 }
 
 pub fn parse_args() -> Cli {
     Cli::parse()
+}
+
+impl Cli {
+    /// Checks that the invocation is complete: either a subcommand, or both a
+    /// method and a URL.
+    pub(crate) fn validate(&self) -> Result<(), AppError> {
+        match (&self.command, &self.method, &self.url) {
+            (Some(_), _, _) => Ok(()),
+            (None, Some(_), Some(_)) => Ok(()),
+            (None, Some(_), None) => Err(AppError::MissingArguments(
+                "expected a URL, or a subcommand such as `rully init`".to_string(),
+            )),
+            (None, None, Some(_)) => Err(AppError::MissingArguments(
+                "expected a method, or a subcommand such as `rully init`".to_string(),
+            )),
+            (None, None, None) => Err(AppError::MissingArguments(
+                "expected a method and a URL, or a subcommand such as `rully init`".to_string(),
+            )),
+        }
+    }
 }
 
 impl TryFrom<&Cli> for Request {
@@ -59,14 +122,22 @@ impl TryFrom<&Cli> for Request {
 
     fn try_from(cli: &Cli) -> Result<Self, AppError> {
         let method = match cli.method {
-            Method::Get => reqwest::Method::GET,
-            Method::Post => reqwest::Method::POST,
-            Method::Put => reqwest::Method::PUT,
-            Method::Delete => reqwest::Method::DELETE,
-            Method::Patch => reqwest::Method::PATCH,
+            Some(Method::Get) => reqwest::Method::GET,
+            Some(Method::Post) => reqwest::Method::POST,
+            Some(Method::Put) => reqwest::Method::PUT,
+            Some(Method::Delete) => reqwest::Method::DELETE,
+            Some(Method::Patch) => reqwest::Method::PATCH,
+            None => {
+                return Err(AppError::MissingArguments("expected a method".to_string()));
+            }
         };
 
-        let mut request = Request::new(method, &cli.url)?;
+        let url = cli
+            .url
+            .as_deref()
+            .ok_or_else(|| AppError::MissingArguments("expected a URL".to_string()))?;
+
+        let mut request = Request::new(method, url)?;
 
         add_query(&mut request, &cli.queries)?;
         add_headers(&mut request, &cli.headers)?;
@@ -152,14 +223,248 @@ mod tests {
     }
 
     #[test]
+    fn rejects_missing_url() {
+        let cli = Cli::try_parse_from(["rully", "GET"]).unwrap();
+        let result = cli.validate();
+
+        assert!(matches!(result, Err(AppError::MissingArguments(_))));
+    }
+
+    #[test]
     fn rejects_missing_required_arguments() {
-        let result = Cli::try_parse_from(["rully"]);
+        let cli = Cli::try_parse_from(["rully"]).unwrap();
+        let result = cli.validate();
+
+        assert!(matches!(result, Err(AppError::MissingArguments(_))));
+    }
+
+    #[test]
+    fn rejects_a_url_without_a_method() {
+        let result = Cli::try_parse_from(["rully", "https://example.com"]);
+
         assert!(result.is_err());
     }
 
     #[test]
-    fn rejects_missing_url() {
-        let result = Cli::try_parse_from(["rully", "GET"]);
+    fn accepts_the_naked_form() {
+        let cli = Cli::try_parse_from(["rully", "GET", "https://example.com"]).unwrap();
+
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn parses_the_init_subcommand() {
+        let cli = Cli::try_parse_from(["rully", "init"]).unwrap();
+
+        assert_eq!(cli.command, Some(Command::Init));
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn parses_the_new_subcommand() {
+        let cli = Cli::try_parse_from(["rully", "new", "users"]).unwrap();
+
+        assert_eq!(
+            cli.command,
+            Some(Command::New {
+                name: "users".to_string()
+            })
+        );
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn parses_the_list_subcommand_without_argument() {
+        let cli = Cli::try_parse_from(["rully", "list"]).unwrap();
+
+        assert_eq!(cli.command, Some(Command::List { collection: None }));
+    }
+
+    #[test]
+    fn parses_the_list_subcommand_with_a_collection() {
+        let cli = Cli::try_parse_from(["rully", "list", "users"]).unwrap();
+
+        assert_eq!(
+            cli.command,
+            Some(Command::List {
+                collection: Some("users".to_string())
+            })
+        );
+    }
+
+    #[test]
+    fn parses_the_run_subcommand() {
+        let cli = Cli::try_parse_from(["rully", "run", "users/list.http"]).unwrap();
+
+        assert_eq!(
+            cli.command,
+            Some(Command::Run {
+                path: "users/list.http".to_string()
+            })
+        );
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn run_requires_a_path() {
+        let result = Cli::try_parse_from(["rully", "run"]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn new_requires_a_collection() {
+        let result = Cli::try_parse_from(["rully", "new"]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_an_unknown_subcommand() {
+        let result = Cli::try_parse_from(["rully", "frobnicate", "https://example.com"]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn keeps_verbose_on_a_subcommand() {
+        let cli = Cli::try_parse_from(["rully", "-v", "run", "users/list.http"]).unwrap();
+
+        assert!(cli.verbose);
+    }
+
+    #[test]
+    fn accepts_a_subcommand_without_a_method_and_url() {
+        for args in [
+            &["rully", "init"][..],
+            &["rully", "new", "users"][..],
+            &["rully", "list"][..],
+            &["rully", "run", "users/list.http"][..],
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+
+            assert!(cli.validate().is_ok(), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn converts_a_method_and_a_url_without_a_subcommand() {
+        let cli = Cli::try_parse_from(["rully", "GET", "https://example.com"]).unwrap();
+        let request = Request::try_from(&cli).unwrap();
+
+        assert_eq!(request.method, reqwest::Method::GET);
+        assert_eq!(request.url.as_str(), "https://example.com/");
+    }
+
+    #[test]
+    fn rejects_a_conversion_without_a_method() {
+        let result = Cli::try_parse_from(["rully", "https://example.com"]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_a_conversion_without_a_url() {
+        let cli = Cli::try_parse_from(["rully"]).unwrap();
+        let result = Request::try_from(&cli);
+
+        assert!(matches!(result, Err(AppError::MissingArguments(_))));
+    }
+
+    #[test]
+    fn parses_the_edit_subcommand() {
+        let cli = Cli::try_parse_from(["rully", "edit", "users/list.http"]).unwrap();
+
+        assert_eq!(
+            cli.command,
+            Some(Command::Edit {
+                path: "users/list.http".to_string()
+            })
+        );
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn parses_the_delete_subcommand() {
+        let cli = Cli::try_parse_from(["rully", "delete", "users/list.http"]).unwrap();
+
+        assert_eq!(
+            cli.command,
+            Some(Command::Delete {
+                path: "users/list.http".to_string()
+            })
+        );
+        assert!(cli.validate().is_ok());
+    }
+
+    #[test]
+    fn edit_requires_a_path() {
+        assert!(Cli::try_parse_from(["rully", "edit"]).is_err());
+    }
+
+    #[test]
+    fn delete_requires_a_path() {
+        assert!(Cli::try_parse_from(["rully", "delete"]).is_err());
+    }
+
+    #[test]
+    fn parses_a_request_path_in_new() {
+        let cli = Cli::try_parse_from(["rully", "new", "users/list.http"]).unwrap();
+
+        assert_eq!(
+            cli.command,
+            Some(Command::New {
+                name: "users/list.http".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn parses_a_collection_name_in_new() {
+        let cli = Cli::try_parse_from(["rully", "new", "users"]).unwrap();
+
+        assert_eq!(
+            cli.command,
+            Some(Command::New {
+                name: "users".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn parses_the_save_flag() {
+        let cli = Cli::try_parse_from([
+            "rully",
+            "GET",
+            "https://example.com",
+            "--save",
+            "users/list",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.save.as_deref(), Some("users/list"));
+        assert_eq!(cli.method, Some(Method::Get));
+    }
+
+    #[test]
+    fn the_save_flag_is_optional() {
+        let cli = Cli::try_parse_from(["rully", "GET", "https://example.com"]).unwrap();
+
+        assert!(cli.save.is_none());
+    }
+
+    #[test]
+    fn the_save_flag_requires_a_value() {
+        let result = Cli::try_parse_from(["rully", "GET", "https://example.com", "--save"]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn the_save_flag_is_not_accepted_on_a_subcommand() {
+        let result =
+            Cli::try_parse_from(["rully", "run", "users/list.http", "--save", "users/other"]);
+
         assert!(result.is_err());
     }
 
@@ -178,8 +483,8 @@ mod tests {
     #[test]
     fn parses_default_arguments() {
         let cli = Cli::try_parse_from(["rully", "GET", "https://example.com"]).unwrap();
-        assert_eq!(cli.method, Method::Get);
-        assert_eq!(cli.url, "https://example.com");
+        assert_eq!(cli.method, Some(Method::Get));
+        assert_eq!(cli.url.as_deref(), Some("https://example.com"));
         assert!(cli.headers.is_empty());
         assert!(cli.queries.is_empty());
         assert!(cli.body.is_none());
@@ -197,7 +502,7 @@ mod tests {
         ];
         for (input, expected) in methods {
             let cli = Cli::try_parse_from(["rully", input, "https://example.com"]).unwrap();
-            assert_eq!(cli.method, expected);
+            assert_eq!(cli.method, Some(expected));
         }
     }
 

@@ -151,14 +151,51 @@ fn display_request_headers(request: &Request) {
     {
         println!("{line}");
     }
-    println!("");
+    println!();
 }
 
 fn display_response_headers(headers: &HeaderMap) {
     for line in response_header_lines(headers) {
         println!("{line}");
     }
-    println!("");
+    println!();
+}
+
+pub(crate) fn display_saved(path: &str) {
+    eprintln!("Saved {}", style::cyan(path));
+}
+
+pub(crate) fn display_edited(path: &str) {
+    println!("Edited {}", style::cyan(path));
+}
+
+pub(crate) fn display_unchanged(path: &str) {
+    println!("No changes to {}", style::cyan(path));
+}
+
+/// Names come straight from the store: collections keep their trailing `/` and
+/// requests keep their `.http` extension, so both can be pasted into another
+/// command.
+pub(crate) fn display_collections(names: &[String]) {
+    if names.is_empty() {
+        println!("No collections found");
+        return;
+    }
+
+    for name in names {
+        println!("{}", style::cyan(name));
+    }
+}
+
+pub(crate) fn display_requests(names: &[String]) {
+    if names.is_empty() {
+        println!("No requests found");
+        return;
+    }
+
+    for name in names {
+        println!("{}", style::yellow(name));
+    }
 }
 
 pub(crate) fn display_response(response: &Response, request: &Request, verbose: bool) {

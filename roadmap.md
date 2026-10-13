@@ -1,14 +1,15 @@
 # Rully Roadmap
 
-Rully is a terminal-first HTTP client written in Rust.
-It currently provides a CLI and will progressively evolve toward a TUI.
+Rully is a terminal API client written in Rust.
+
+The TUI is the product: `rully` launches an interactive client over
+collections stored as plain `.http` files under `rully/collections/`, so
+they are reviewable in Git and shareable through pull requests.
+
+The CLI is kept for scripting and CI (`rully run`, exit codes). It is
+maintained, not developed — the TUI is where features land.
 
 This project is a good excuse for me to build a project in Rust after finishing the book :)
-
-## Current Focus
-
-Finalize the CLI output and error handling, then extract the HTTP engine
-into a reusable core shared by the CLI and the future TUI.
 
 ## Legend
 
@@ -126,9 +127,6 @@ into a reusable core shared by the CLI and the future TUI.
 - [x] Add HTTP integration tests
 - [x] Test requests and responses with a local server
 - [x] Test the main error cases
-- [-] Add a README
-- [-] Document installation
-- [-] Document usage examples
 - [x] Pass `cargo fmt`
 - [x] Pass `cargo clippy -- -D warnings`
 - [x] Pass `cargo test`
@@ -146,17 +144,46 @@ The MVP should provide:
 
 ## Phase 7 - Collections
 
-- [ ] Define a human-readable, Git-friendly request file format
-- [ ] Save requests
-- [ ] Load requests
-- [ ] Update requests
-- [ ] Delete requests
-- [ ] Organize requests into collections
-- [ ] Execute saved requests
+- [x] Define a human-readable, Git-friendly request file format
+- [x] Save requests
+- [x] Load requests
+- [x] Update requests
+- [x] Delete requests
+- [x] Organize requests into collections
+- [x] Execute saved requests
 
 ---
 
-## Phase 8 - Variables and Environments
+## Phase 8 - TUI Skeleton
+
+**Goal:** a launchable TUI over features that already exist. Nothing new is
+introduced here, so nothing here can surprise us.
+
+- [ ] Add `ratatui`, keep the core independent of it
+- [ ] Build the test harness first: synthesised key events, assertions
+      against the `TestBackend` buffer
+- [ ] Launch the TUI with `rully`
+- [ ] Render the collections tree
+- [ ] Load a request on selection
+- [ ] Display method, URL, headers and body read-only
+
+---
+
+## Phase 9 - TUI Editor
+
+**Goal:** the point where the remaining features get demanded by a screen
+rather than by a plan.
+
+- [ ] Body types: json, text, form, none
+- [ ] Auth: bearer, basic, api key — and where it lives in `.http`
+- [ ] Edit URL and method
+- [ ] Edit headers and body
+- [ ] Save back to `.http`, keeping comments intact
+- [ ] Mouse selection, clipboard via OSC 52
+
+---
+
+## Phase 10 - Environments and History
 
 - [ ] Define variables
 - [ ] Interpolate variables in requests
@@ -164,31 +191,35 @@ The MVP should provide:
 - [ ] Select an environment
 - [ ] Support a default environment
 - [ ] Protect secrets from logs and normal output
+- [ ] Request history
 
 ---
 
-## Phase 9 - TUI
+## Phase 11 - Streaming
 
-**Goal:** provide an interactive API client built on top of the same core.
+**Goal:** render the body as it arrives instead of waiting for it to be
+complete. The only structural change the TUI forces on the core.
 
-- [ ] Launch the TUI with `rully`
-- [ ] Display collections
-- [ ] Edit requests
-- [ ] Edit URLs and methods
-- [ ] Edit headers and request bodies
-- [ ] Send requests
-- [ ] Display responses
-- [ ] Format JSON in the response view
-- [ ] Select an environment
-- [ ] Add request history
-- [ ] Add keyboard navigation
+- [ ] Turn `Response.body` into a channel
+- [ ] SSE and chunked responses
+- [ ] Tail-follow, cancel in flight
 
 ---
 
-## Phase 10 - Distribution
+## Phase 12 - Distribution
 
-- [ ] Finalize the documentation
+**Goal:** a V1 usable personally, then published.
+
+- [ ] Add a README
+- [ ] Document installation
+- [ ] Document the key map
 - [ ] Add automated builds
 - [ ] Publish binaries for macOS, Linux, and Windows
 - [ ] Prepare GitHub releases
-- [ ] Evaluate Homebrew distribution
+- [ ] Evaluate crates.io and Homebrew distribution
+
+---
+
+## Later
+
+Once the TUI is stable, the CLI reduces to `rully run <path>` for CI.

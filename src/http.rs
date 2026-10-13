@@ -8,6 +8,11 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
+/// Headers Rully declares explicitly.
+///
+/// `Accept-Encoding` is set here as well as by reqwest's `gzip` feature:
+/// the header is sent either way, but declaring it keeps the verbose
+/// output honest, since it reconstructs what Rully adds from this map.
 pub fn default_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
 

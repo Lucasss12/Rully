@@ -1,13 +1,10 @@
 use std::{io, path::PathBuf};
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use ratatui::text::Line;
+use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use ratatui::{
     DefaultTerminal, Frame,
-    buffer::Buffer,
-    layout::{Constraint, Layout, Rect},
-    style::Style,
-    widgets::{Block, List, ListState, Paragraph, StatefulWidget, Widget},
+    layout::{Constraint, Layout},
+    widgets::{Block, ListState, Paragraph},
 };
 
 use rully_core::errors::AppError;
@@ -16,6 +13,14 @@ use rully_core::store;
 pub fn run(root: PathBuf) -> Result<(), AppError> {
     ratatui::run(|terminal| App::new(root).run(terminal)).map_err(AppError::Terminal)
 }
+
+mod keys;
+use keys::Action;
+
+mod left_panel;
+use left_panel::LeftPanel;
+
+mod view;
 
 #[derive(Debug)]
 pub struct App {
@@ -71,8 +76,8 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let title = self.bread_crumb();
-        let empty = self.empty_message();
+        let title = view::bread_crumb(self.open_collection.as_deref());
+        let empty = view::empty_message(self.open_collection.as_deref());
 
         let [main, bottom] =
             Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
@@ -84,16 +89,22 @@ impl App {
                 items: &self.items,
                 error: self.error.as_deref(),
                 title: &title,
-                empty: &empty,
+                empty,
             },
             left,
             &mut self.state,
         );
+
         frame.render_widget(
             Paragraph::new("").block(Block::bordered().title("droite")),
             right,
         );
-        frame.render_widget(Paragraph::new(self.help_line()), bottom);
+        frame.render_widget(
+            Paragraph::new(keys::help_line(keys::current_binding(
+                self.open_collection.as_deref(),
+            ))),
+            bottom,
+        );
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -107,9 +118,13 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        let Some(binding) = self.keys().iter().find(|b| b.key == key_event.code) else {
+        let Some(binding) = keys::current_binding(self.open_collection.as_deref())
+            .iter()
+            .find(|b| b.key == key_event.code)
+        else {
             return;
         };
+
         self.dispatch(binding.action);
     }
 
@@ -162,35 +177,6 @@ impl App {
         }
     }
 
-    fn bread_crumb(&self) -> String {
-        match &self.open_collection {
-            None => "Collections".to_string(),
-            Some(name) => format!("Collections/{name}"),
-        }
-    }
-
-    fn empty_message(&self) -> &'static str {
-        match &self.open_collection {
-            None => "No collections found",
-            Some(_) => "No requests found",
-        }
-    }
-
-    fn keys(&self) -> &'static [Binding] {
-        match &self.open_collection {
-            None => ROOT_KEYS,
-            Some(_) => COLLECTION_KEYS,
-        }
-    }
-
-    fn help_line(&self) -> String {
-        self.keys()
-            .iter()
-            .map(|b| b.help)
-            .collect::<Vec<_>>()
-            .join("  ·  ")
-    }
-
     fn go_back(&mut self) {
         if self.open_collection.take().is_some() {
             self.refresh();
@@ -201,102 +187,3 @@ impl App {
         self.exit = true;
     }
 }
-
-struct LeftPanel<'a> {
-    items: &'a [String],
-    error: Option<&'a str>,
-    title: &'a str,
-    empty: &'a str,
-}
-
-impl StatefulWidget for LeftPanel<'_> {
-    type State = ListState;
-    fn render(self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
-        if let Some(error) = self.error {
-            Paragraph::new(error)
-                .block(Block::bordered().title(self.title))
-                .render(area, buf);
-            return;
-        }
-        if self.items.is_empty() {
-            Paragraph::new(self.empty)
-                .block(Block::bordered().title(self.title))
-                .render(area, buf);
-            return;
-        }
-
-        let position = state.selected().map_or(0, |index| index + 1);
-        let label = format!("[{position} of {}]", self.items.len());
-
-        let block = Block::bordered()
-            .title(self.title)
-            .title_bottom(Line::from(label).right_aligned());
-
-        let items = self.items.iter().map(String::as_str);
-        let list = List::new(items)
-            .block(block)
-            .highlight_style(Style::new().reversed());
-        StatefulWidget::render(list, area, buf, state);
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Action {
-    Quit,
-    SelectPrevious,
-    SelectNext,
-    Activate,
-    GoBack,
-}
-
-struct Binding {
-    key: KeyCode,
-    help: &'static str,
-    action: Action,
-}
-
-const ROOT_KEYS: &[Binding] = &[
-    Binding {
-        key: KeyCode::Char('q'),
-        help: "q quit",
-        action: Action::Quit,
-    },
-    Binding {
-        key: KeyCode::Up,
-        help: "↑ up",
-        action: Action::SelectPrevious,
-    },
-    Binding {
-        key: KeyCode::Down,
-        help: "↓ down",
-        action: Action::SelectNext,
-    },
-    Binding {
-        key: KeyCode::Enter,
-        help: "↵ open",
-        action: Action::Activate,
-    },
-];
-
-const COLLECTION_KEYS: &[Binding] = &[
-    Binding {
-        key: KeyCode::Char('q'),
-        help: "q quit",
-        action: Action::Quit,
-    },
-    Binding {
-        key: KeyCode::Up,
-        help: "↑ up",
-        action: Action::SelectPrevious,
-    },
-    Binding {
-        key: KeyCode::Down,
-        help: "↓ down",
-        action: Action::SelectNext,
-    },
-    Binding {
-        key: KeyCode::Esc,
-        help: "esc back",
-        action: Action::GoBack,
-    },
-];

@@ -24,6 +24,7 @@ pub enum AppError {
     MissingArguments(String),
     NoEditor,
     EditorFailed(String),
+    Terminal(std::io::Error),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -61,6 +62,7 @@ impl AppError {
             AppError::MissingArguments(_) => ErrorCategory::Cli,
             AppError::NoEditor => ErrorCategory::Cli,
             AppError::EditorFailed(_) => ErrorCategory::Cli,
+            AppError::Terminal(_) => ErrorCategory::Cli,
         }
     }
 }
@@ -148,6 +150,9 @@ impl std::fmt::Display for AppError {
             AppError::EditorFailed(message) => {
                 write!(formatter, "Editor failed: {message}")
             }
+            AppError::Terminal(error) => {
+                write!(formatter, "Could not write to the terminal: {error}")
+            }
         }
     }
 }
@@ -219,6 +224,10 @@ mod tests {
             ),
             (AppError::NoEditor, ErrorCategory::Cli),
             (AppError::EditorFailed(String::new()), ErrorCategory::Cli),
+            (
+                AppError::Terminal(std::io::Error::other("terminal")),
+                ErrorCategory::Cli,
+            ),
         ];
 
         for (error, expected) in cases {

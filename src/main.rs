@@ -1,6 +1,7 @@
 mod cli;
 mod output;
 mod style;
+mod tui;
 use rully_core::errors::AppError;
 use rully_core::errors::ErrorCategory;
 use rully_core::http;
@@ -35,6 +36,11 @@ async fn run() -> Result<(), AppError> {
 
             println!("Created {}", style::cyan(&root.display().to_string()));
         }
+        Some(cli::Command::Tui) => {
+            let root = store::open(&cwd)?;
+            tui::run(root)?;
+        }
+
         Some(cli::Command::New { name }) => {
             let root = store::open(&cwd)?;
 

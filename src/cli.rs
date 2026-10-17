@@ -22,6 +22,9 @@ pub(crate) enum Command {
     /// Create the workspace in the current directory.
     Init,
 
+    /// Launch the interactive terminal client.
+    Tui,
+
     /// Create a collection, or a request inside an existing collection.
     New {
         /// Collection name, or `collection/request.http` for a request.

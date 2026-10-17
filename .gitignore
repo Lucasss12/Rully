@@ -1,6 +1,9 @@
 # Rust
 /target/
 
+# Local rully workspace (test data)
+/rully/
+
 # IDE
 .idea/
 .vscode/

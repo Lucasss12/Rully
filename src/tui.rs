@@ -19,8 +19,8 @@ pub fn run(root: PathBuf) -> Result<(), AppError> {
 
 #[derive(Debug)]
 pub struct App {
-    root: PathBuf,      // chemin du dossier de collection
-    items: Vec<String>, // liste de collections
+    root: PathBuf,
+    items: Vec<String>,
     error: Option<String>,
     exit: bool,
     state: ListState,
@@ -71,16 +71,14 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        // 1) UN layout, deux contraintes -> deux Rect
         let title = self.bread_crumb();
         let empty = self.empty_message();
-        let [gauche, droite] = Layout::horizontal([
-            Constraint::Length(30), // zone gauche : 30 colonnes
-            Constraint::Fill(1),    // zone droite : le reste
-        ])
-        .areas(frame.area());
 
-        // 2) un widget par Rect
+        let [main, bottom] =
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
+        let [left, right] =
+            Layout::horizontal([Constraint::Length(30), Constraint::Fill(1)]).areas(main);
+
         frame.render_stateful_widget(
             LeftPanel {
                 items: &self.items,
@@ -88,10 +86,14 @@ impl App {
                 title: &title,
                 empty: &empty,
             },
-            gauche,
+            left,
             &mut self.state,
         );
-        frame.render_widget(Paragraph::new("colonne droite"), droite);
+        frame.render_widget(
+            Paragraph::new("").block(Block::bordered().title("droite")),
+            right,
+        );
+        frame.render_widget(Paragraph::new(self.help_line()), bottom);
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -105,13 +107,19 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match key_event.code {
-            KeyCode::Char('q') => self.quit(),
-            KeyCode::Up => self.select_previous(),
-            KeyCode::Down => self.select_next(),
-            KeyCode::Enter => self.activate(),
-            KeyCode::Esc => self.go_back(),
-            _ => {}
+        let Some(binding) = self.keys().iter().find(|b| b.key == key_event.code) else {
+            return;
+        };
+        self.dispatch(binding.action);
+    }
+
+    fn dispatch(&mut self, action: Action) {
+        match action {
+            Action::Quit => self.quit(),
+            Action::SelectPrevious => self.select_previous(),
+            Action::SelectNext => self.select_next(),
+            Action::Activate => self.activate(),
+            Action::GoBack => self.go_back(),
         }
     }
 
@@ -143,7 +151,7 @@ impl App {
 
     fn activate(&mut self) {
         if self.open_collection.is_some() {
-            return; // déjà dans une collection : pas de sous-niveau
+            return;
         }
         let Some(entry) = self.selected_entry() else {
             return;
@@ -168,6 +176,21 @@ impl App {
         }
     }
 
+    fn keys(&self) -> &'static [Binding] {
+        match &self.open_collection {
+            None => ROOT_KEYS,
+            Some(_) => COLLECTION_KEYS,
+        }
+    }
+
+    fn help_line(&self) -> String {
+        self.keys()
+            .iter()
+            .map(|b| b.help)
+            .collect::<Vec<_>>()
+            .join("  ·  ")
+    }
+
     fn go_back(&mut self) {
         if self.open_collection.take().is_some() {
             self.refresh();
@@ -190,7 +213,7 @@ impl StatefulWidget for LeftPanel<'_> {
     type State = ListState;
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
         if let Some(error) = self.error {
-            Paragraph::new(error) // erreur affichée à gauche
+            Paragraph::new(error)
                 .block(Block::bordered().title(self.title))
                 .render(area, buf);
             return;
@@ -216,3 +239,64 @@ impl StatefulWidget for LeftPanel<'_> {
         StatefulWidget::render(list, area, buf, state);
     }
 }
+
+#[derive(Clone, Copy)]
+enum Action {
+    Quit,
+    SelectPrevious,
+    SelectNext,
+    Activate,
+    GoBack,
+}
+
+struct Binding {
+    key: KeyCode,
+    help: &'static str,
+    action: Action,
+}
+
+const ROOT_KEYS: &[Binding] = &[
+    Binding {
+        key: KeyCode::Char('q'),
+        help: "q quit",
+        action: Action::Quit,
+    },
+    Binding {
+        key: KeyCode::Up,
+        help: "↑ up",
+        action: Action::SelectPrevious,
+    },
+    Binding {
+        key: KeyCode::Down,
+        help: "↓ down",
+        action: Action::SelectNext,
+    },
+    Binding {
+        key: KeyCode::Enter,
+        help: "↵ open",
+        action: Action::Activate,
+    },
+];
+
+const COLLECTION_KEYS: &[Binding] = &[
+    Binding {
+        key: KeyCode::Char('q'),
+        help: "q quit",
+        action: Action::Quit,
+    },
+    Binding {
+        key: KeyCode::Up,
+        help: "↑ up",
+        action: Action::SelectPrevious,
+    },
+    Binding {
+        key: KeyCode::Down,
+        help: "↓ down",
+        action: Action::SelectNext,
+    },
+    Binding {
+        key: KeyCode::Esc,
+        help: "esc back",
+        action: Action::GoBack,
+    },
+];

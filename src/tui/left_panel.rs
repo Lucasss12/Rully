@@ -6,11 +6,14 @@ use ratatui::{
     widgets::{Block, List, ListState, Paragraph, StatefulWidget, Widget},
 };
 
+use super::view;
+
 pub(super) struct LeftPanel<'a> {
     pub(super) items: &'a [String],
     pub(super) error: Option<&'a str>,
     pub(super) title: &'a str,
     pub(super) empty: &'a str,
+    pub(super) focused: bool,
 }
 
 impl StatefulWidget for LeftPanel<'_> {
@@ -34,6 +37,7 @@ impl StatefulWidget for LeftPanel<'_> {
 
         let block = Block::bordered()
             .title(self.title)
+            .border_style(view::border_style(self.focused))
             .title_bottom(Line::from(label).right_aligned());
 
         let items = self.items.iter().map(String::as_str);

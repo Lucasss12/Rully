@@ -22,7 +22,7 @@ pub(super) fn render(frame: &mut Frame, area: Rect, draft: Option<&Draft>, focus
             draft.url.as_str(),
             Style::new(),
         ),
-        None => ("", "Select a request", view::dim()),
+        None => (METHODS[0], "Select a request", view::dim()),
     };
 
     frame.render_widget(

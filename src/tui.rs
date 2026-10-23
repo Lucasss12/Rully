@@ -41,7 +41,7 @@ mod content;
 #[derive(Debug)]
 struct App {
     // Workspace and collections tree (left panel).
-    root: PathBuf,         // workspace root: the `rully/collections` directory
+    root: PathBuf,            // workspace root: the `rully/collections` directory
     items: Vec<String>, // rows shown in the tree: the collections, or the requests of the open collection
     error: Option<String>, // last error to show in the tree, if any
     state: ListState,   // tree selection: which row is highlighted
@@ -260,13 +260,11 @@ impl App {
     /// Looks the key up in the table for the current focus (or the method menu
     /// when it is open) and dispatches the matching action.
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        let Some(binding) = keys::current_binding(
-            self.focus,
-            self.location.as_deref(),
-            self.method_menu.open,
-        )
-        .iter()
-        .find(|b| b.key == key_event.code) else {
+        let Some(binding) =
+            keys::current_binding(self.focus, self.location.as_deref(), self.method_menu.open)
+                .iter()
+                .find(|b| b.key == key_event.code)
+        else {
             return;
         };
 
@@ -416,3 +414,6 @@ impl App {
         self.request_tab = RequestTab::switch_tabs(self.request_tab);
     }
 }
+
+#[cfg(test)]
+mod tests;

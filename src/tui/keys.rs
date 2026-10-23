@@ -18,6 +18,7 @@ pub(super) enum Action {
     TabPrevious,
     TabNext,
     OpenMethodMenu,
+    OpenBodyMenu,
     FocusLeftPanel,
 }
 
@@ -88,7 +89,7 @@ const COLLECTION_KEYS: &[Binding] = &[
     },
 ];
 
-const METHOD_KEYS: &[Binding] = &[
+const MENU_KEYS: &[Binding] = &[
     Binding {
         key: KeyCode::Char('q'),
         help: "q quit",
@@ -161,6 +162,11 @@ const REQUEST_KEYS: &[Binding] = &[
         action: Action::TabNext,
     },
     Binding {
+        key: KeyCode::Char('b'),
+        help: "b body",
+        action: Action::OpenBodyMenu,
+    },
+    Binding {
         key: KeyCode::Tab,
         help: "tab",
         action: Action::NextFocus,
@@ -196,7 +202,7 @@ pub(super) fn current_binding(
     menu_open: bool,
 ) -> &'static [Binding] {
     if menu_open {
-        return METHOD_KEYS;
+        return MENU_KEYS;
     }
 
     match focus {

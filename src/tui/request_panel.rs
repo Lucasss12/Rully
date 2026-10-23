@@ -35,8 +35,12 @@ pub(super) fn render(
     tab: RequestTab,
     focused: bool,
 ) {
+    let title = match draft {
+        Some(draft) => format!("Request · {}", draft.body_kind.label()),
+        None => "Request".to_string(),
+    };
     let block = Block::bordered()
-        .title("Request")
+        .title(title)
         .border_style(view::border_style(focused));
 
     let inner = block.inner(area);
@@ -61,13 +65,14 @@ fn paragraph(draft: Option<&Draft>, tab: RequestTab) -> Paragraph<'_> {
             }
             Paragraph::new(content::header_lines(&draft.headers)).wrap(Wrap { trim: false })
         }
+        RequestTab::Body if draft.body_kind == content::BodyKind::None => {
+            Paragraph::new("No body").style(view::dim())
+        }
         RequestTab::Body => match draft.body.as_deref() {
             None => Paragraph::new("No body").style(view::dim()),
-            Some(body) => Paragraph::new(content::body_text(
-                body,
-                content::wants_json(&draft.headers),
-            ))
-            .wrap(Wrap { trim: false }),
+            Some(body) => {
+                Paragraph::new(content::body_text(body, draft.body_kind)).wrap(Wrap { trim: false })
+            }
         },
     }
 }

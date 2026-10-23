@@ -540,6 +540,191 @@ fn creates_a_draft_when_none_is_loaded() {
 }
 
 #[test]
+fn opens_the_body_menu_on_b() {
+    let fixture = Fixture::with(
+        "body-menu-open",
+        &["users"],
+        &[(
+            "users/create.http",
+            "POST https://api.example.com/users\n\
+             Content-Type: application/json\n\n\
+             {\"name\":\"John\"}",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal_sized(100, 40);
+
+    draw(&mut app, &mut terminal);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('b'));
+    draw(&mut app, &mut terminal);
+
+    assert!(app.body_menu.open);
+    assert_eq!(app.body_menu.index, 1);
+    assert!(!app.method_menu.open);
+
+    let text = screen(&terminal);
+    for kind in BODY_KINDS {
+        assert!(
+            text.contains(kind.label()),
+            "{kind:?} missing from:\n{text}"
+        );
+    }
+}
+
+#[test]
+fn confirms_a_new_body_type() {
+    let fixture = Fixture::with(
+        "body-menu-confirm",
+        &["users"],
+        &[(
+            "users/create.http",
+            "POST https://api.example.com/users\n\
+             Content-Type: application/json\n\n\
+             {\"name\":\"John\"}",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal_sized(100, 40);
+
+    draw(&mut app, &mut terminal);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('b'));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    draw(&mut app, &mut terminal);
+
+    assert!(!app.body_menu.open);
+
+    let draft = app.draft.as_ref().expect("the request should be loaded");
+    assert_eq!(draft.body_kind, BodyKind::Form);
+    assert_eq!(draft.body.as_deref(), Some(r#"{"name":"John"}"#));
+    assert_eq!(
+        draft
+            .headers
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/x-www-form-urlencoded")
+    );
+
+    assert!(screen(&terminal).contains("Request · form"));
+}
+
+#[test]
+fn choosing_none_hides_the_body_without_losing_it() {
+    let fixture = Fixture::with(
+        "body-menu-none",
+        &["users"],
+        &[(
+            "users/create.http",
+            "POST https://api.example.com/users\n\
+             Content-Type: application/json\n\n\
+             {\"name\":\"John\"}",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal_sized(100, 40);
+
+    draw(&mut app, &mut terminal);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('b'));
+    press(&mut app, KeyCode::Up);
+    press(&mut app, KeyCode::Enter);
+    draw(&mut app, &mut terminal);
+
+    let draft = app.draft.as_ref().expect("the request should be loaded");
+    assert_eq!(draft.body_kind, BodyKind::None);
+    assert_eq!(draft.body.as_deref(), Some(r#"{"name":"John"}"#));
+    assert_eq!(
+        draft
+            .headers
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json")
+    );
+    assert!(screen(&terminal).contains("Request · none"));
+
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    draw(&mut app, &mut terminal);
+    assert!(screen(&terminal).contains("No body"));
+
+    press(&mut app, KeyCode::Left);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('b'));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    draw(&mut app, &mut terminal);
+
+    let draft = app.draft.as_ref().expect("the request should be loaded");
+    assert_eq!(draft.body_kind, BodyKind::Json);
+    assert_eq!(draft.body.as_deref(), Some(r#"{"name":"John"}"#));
+    assert_eq!(
+        draft
+            .headers
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json")
+    );
+    assert!(screen(&terminal).contains("Request · json"));
+
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    draw(&mut app, &mut terminal);
+    assert!(screen(&terminal).contains("\"name\": \"John\""));
+}
+
+#[test]
+fn shows_form_pairs_on_the_body_tab() {
+    let fixture = Fixture::with(
+        "form-body",
+        &["users"],
+        &[(
+            "users/create.http",
+            "POST https://api.example.com/users\n\
+             Content-Type: application/x-www-form-urlencoded\n\n\
+             name=John&age=30",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal_sized(100, 40);
+
+    draw(&mut app, &mut terminal);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    draw(&mut app, &mut terminal);
+
+    let text = screen(&terminal);
+    assert!(text.contains("Request · form"), "{text}");
+    assert!(text.contains("name = John"), "{text}");
+    assert!(text.contains("age = 30"), "{text}");
+}
+
+#[test]
+fn ignores_b_without_a_request() {
+    let fixture = Fixture::with("body-menu-no-draft", &["users"], &[]);
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('b'));
+
+    assert!(!app.body_menu.open);
+    assert!(app.draft.is_none());
+}
+
+#[test]
 fn q_exits() {
     let fixture = Fixture::empty("quit");
     let mut app = App::new(fixture.root());

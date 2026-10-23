@@ -10,7 +10,7 @@ use ratatui::{
     widgets::{ListState, Paragraph},
 };
 
-use reqwest::header::HeaderMap;
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use rully_core::errors::AppError;
 use rully_core::store;
 use rully_core::{http_file, request::Request};
@@ -37,6 +37,7 @@ use request_panel::RequestTab;
 mod response_panel;
 
 mod content;
+use content::{BODY_KINDS, BodyKind};
 
 #[derive(Debug)]
 struct App {
@@ -51,9 +52,10 @@ struct App {
     draft: Option<Draft>,    // the request being viewed, once one is loaded
     request_tab: RequestTab, // active request tab: Headers or Body
 
-    // Focus and the method menu that floats over the request bar.
+    // Focus and the menus that float over the interface.
     focus: Focus,
-    method_menu: MethodMenu, // the method picker: open flag + highlighted entry
+    method_menu: Menu, // the method picker: open flag + highlighted entry
+    body_menu: Menu,   // the body type picker, anchored under the request panel
 
     // Event loop.
     exit: bool,
@@ -81,6 +83,7 @@ struct Draft {
     url: String,
     headers: HeaderMap,
     body: Option<String>,
+    body_kind: BodyKind,
 }
 
 impl Draft {
@@ -90,19 +93,34 @@ impl Draft {
             url: String::new(),
             headers: HeaderMap::new(),
             body: None,
+            body_kind: BodyKind::None,
+        }
+    }
+
+    /// Applies a body type chosen in the UI to the draft.
+    ///
+    /// The raw body is kept as-is; only the type and its `Content-Type` change.
+    /// Choosing `None` hides the body and omits it when the request is sent,
+    /// but keeps both the body and its `Content-Type` in the draft.
+    fn set_body_kind(&mut self, kind: BodyKind) {
+        self.body_kind = kind;
+
+        if let Some(content_type) = kind.content_type() {
+            self.headers
+                .insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
         }
     }
 }
 
-/// The modal list of HTTP methods, shown over the request bar. While it is open
-/// it captures the keys, so the focus underneath never moves.
+/// A modal list shown over the interface. While it is open it captures the
+/// keys, so the focus underneath never moves.
 #[derive(Debug)]
-struct MethodMenu {
+struct Menu {
     open: bool,
     index: usize,
 }
 
-impl MethodMenu {
+impl Menu {
     fn new() -> Self {
         Self {
             open: false,
@@ -110,9 +128,8 @@ impl MethodMenu {
         }
     }
 
-    /// Opens the menu, highlighting the draft's current method (GET if none).
-    fn show(&mut self, draft: Option<&Draft>) {
-        self.index = draft.map_or(0, |draft| draft.method_index);
+    fn show(&mut self, index: usize) {
+        self.index = index;
         self.open = true;
     }
 
@@ -120,19 +137,12 @@ impl MethodMenu {
         self.open = false;
     }
 
-    fn previous(&mut self) {
-        self.index = (self.index + METHODS.len() - 1) % METHODS.len();
+    fn previous(&mut self, len: usize) {
+        self.index = (self.index + len - 1) % len;
     }
 
-    fn next(&mut self) {
-        self.index = (self.index + 1) % METHODS.len();
-    }
-
-    /// Writes the highlighted method into `draft` (creating it if needed) and
-    /// closes the menu.
-    fn confirm(&mut self, draft: &mut Option<Draft>) {
-        draft.get_or_insert_with(Draft::empty).method_index = self.index;
-        self.open = false;
+    fn next(&mut self, len: usize) {
+        self.index = (self.index + 1) % len;
     }
 }
 
@@ -158,7 +168,8 @@ impl App {
             draft: None,
             request_tab: RequestTab::Headers,
             focus: Focus::LeftPanel,
-            method_menu: MethodMenu::new(),
+            method_menu: Menu::new(),
+            body_menu: Menu::new(),
             exit: false,
         };
         app.refresh();
@@ -226,11 +237,13 @@ impl App {
         );
         response_panel::render(frame, response, self.focus == Focus::Response);
 
+        let menu_open = self.method_menu.open || self.body_menu.open;
+
         frame.render_widget(
             Paragraph::new(keys::help_line(keys::current_binding(
                 self.focus,
                 self.location.as_deref(),
-                self.method_menu.open,
+                menu_open,
             ))),
             help,
         );
@@ -244,6 +257,17 @@ impl App {
                 height: 7,
             };
             methods_menu::render(frame, popup, &METHODS, self.method_menu.index);
+        }
+
+        if self.body_menu.open {
+            let labels = BODY_KINDS.map(BodyKind::label);
+            let popup = Rect {
+                x: request.x + 1,
+                y: request.y + 2,
+                width: 12,
+                height: 6,
+            };
+            methods_menu::render(frame, popup, &labels, self.body_menu.index);
         }
     }
 
@@ -260,11 +284,13 @@ impl App {
     /// Looks the key up in the table for the current focus (or the method menu
     /// when it is open) and dispatches the matching action.
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        let Some(binding) =
-            keys::current_binding(self.focus, self.location.as_deref(), self.method_menu.open)
-                .iter()
-                .find(|b| b.key == key_event.code)
-        else {
+        let Some(binding) = keys::current_binding(
+            self.focus,
+            self.location.as_deref(),
+            self.method_menu.open || self.body_menu.open,
+        )
+        .iter()
+        .find(|b| b.key == key_event.code) else {
             return;
         };
 
@@ -288,6 +314,7 @@ impl App {
             Action::TabPrevious => self.switch_tab(),
             Action::TabNext => self.switch_tab(),
             Action::OpenMethodMenu => self.open_method_menu(),
+            Action::OpenBodyMenu => self.open_body_menu(),
             Action::FocusLeftPanel => self.focus = Focus::LeftPanel,
         }
     }
@@ -326,15 +353,18 @@ impl App {
         let path = store::request_path(root, relative)?;
         let file = http_file::read(&path.to_string_lossy())?;
         let request = Request::try_from(file)?;
+        let body_kind = BodyKind::of(&request.headers, request.body.as_deref());
+        let method_index = METHODS
+            .iter()
+            .position(|method| *method == request.method.as_str())
+            .unwrap_or(0);
 
         Ok(Draft {
-            method_index: METHODS
-                .iter()
-                .position(|method| *method == request.method.as_str())
-                .unwrap_or(0),
+            method_index,
             url: request.url.to_string(),
             headers: request.headers,
             body: request.body,
+            body_kind,
         })
     }
 
@@ -391,23 +421,54 @@ impl App {
     }
 
     fn open_method_menu(&mut self) {
-        self.method_menu.show(self.draft.as_ref());
+        let index = self.draft.as_ref().map_or(0, |draft| draft.method_index);
+
+        self.body_menu.close();
+        self.method_menu.show(index);
+    }
+
+    fn open_body_menu(&mut self) {
+        let Some(index) = self.draft.as_ref().map(|draft| draft.body_kind.index()) else {
+            return;
+        };
+
+        self.method_menu.close();
+        self.body_menu.show(index);
     }
 
     fn menu_previous(&mut self) {
-        self.method_menu.previous();
+        if self.method_menu.open {
+            self.method_menu.previous(METHODS.len());
+        } else if self.body_menu.open {
+            self.body_menu.previous(BODY_KINDS.len());
+        }
     }
 
     fn menu_next(&mut self) {
-        self.method_menu.next();
+        if self.method_menu.open {
+            self.method_menu.next(METHODS.len());
+        } else if self.body_menu.open {
+            self.body_menu.next(BODY_KINDS.len());
+        }
     }
 
     fn menu_confirm(&mut self) {
-        self.method_menu.confirm(&mut self.draft);
+        if self.method_menu.open {
+            let method_index = self.method_menu.index;
+            self.draft.get_or_insert_with(Draft::empty).method_index = method_index;
+            self.method_menu.close();
+        } else if self.body_menu.open {
+            let kind = BODY_KINDS[self.body_menu.index];
+            if let Some(draft) = &mut self.draft {
+                draft.set_body_kind(kind);
+            }
+            self.body_menu.close();
+        }
     }
 
     fn menu_cancel(&mut self) {
         self.method_menu.close();
+        self.body_menu.close();
     }
 
     fn switch_tab(&mut self) {

@@ -282,7 +282,8 @@ fn confirms_a_new_method() {
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Char('m'));
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('b'));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Enter);
     draw(&mut app, &mut terminal);
@@ -558,6 +559,7 @@ fn opens_the_body_menu_on_b() {
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Char('b'));
     draw(&mut app, &mut terminal);
 
@@ -592,6 +594,7 @@ fn confirms_a_new_body_type() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Char('b'));
     press(&mut app, KeyCode::Down);
@@ -633,6 +636,7 @@ fn choosing_none_hides_the_body_without_losing_it() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Char('b'));
     press(&mut app, KeyCode::Up);
@@ -717,6 +721,7 @@ fn ignores_b_without_a_request() {
     let mut terminal = terminal();
 
     draw(&mut app, &mut terminal);
+    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Char('b'));
 

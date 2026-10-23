@@ -19,6 +19,7 @@ pub(super) enum Action {
     TabNext,
     OpenMethodMenu,
     OpenBodyMenu,
+    OpenAuthMenu,
     FocusLeftPanel,
 }
 
@@ -165,6 +166,11 @@ const REQUEST_KEYS: &[Binding] = &[
         key: KeyCode::Char('b'),
         help: "b body",
         action: Action::OpenBodyMenu,
+    },
+    Binding {
+        key: KeyCode::Char('a'),
+        help: "a auth",
+        action: Action::OpenAuthMenu,
     },
     Binding {
         key: KeyCode::Tab,

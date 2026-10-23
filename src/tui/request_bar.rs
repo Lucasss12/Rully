@@ -31,6 +31,7 @@ pub(super) fn render(frame: &mut Frame, area: Rect, draft: Option<&Draft>, focus
             .block(Block::new().borders(Borders::RIGHT)),
         method_area,
     );
+    
     frame.render_widget(
         Paragraph::new(url)
             .style(style)

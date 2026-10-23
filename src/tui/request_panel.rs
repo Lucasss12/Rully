@@ -10,21 +10,28 @@ use super::{Draft, content, view};
 pub(super) enum RequestTab {
     Headers,
     Body,
+    Auth,
 }
 
 impl RequestTab {
+    pub const ALL: [Self; 3] = [Self::Headers, Self::Body, Self::Auth];
+
     fn index(self) -> usize {
         match self {
             RequestTab::Headers => 0,
             RequestTab::Body => 1,
+            RequestTab::Auth => 2,
         }
     }
 
-    pub(super) fn switch_tabs(self) -> Self {
-        match self {
-            RequestTab::Headers => RequestTab::Body,
-            RequestTab::Body => RequestTab::Headers,
-        }
+    pub(super) fn switch_tabs(self, forward: bool) -> Self {
+        let len = Self::ALL.len();
+        let index = if forward {
+            (self.index() + 1) % len
+        } else {
+            (self.index() + len - 1) % len
+        };
+        Self::ALL[index]
     }
 }
 
@@ -36,7 +43,14 @@ pub(super) fn render(
     focused: bool,
 ) {
     let title = match draft {
-        Some(draft) => format!("Request · {}", draft.body_kind.label()),
+        Some(draft) => {
+            let auth = content::AuthKind::of(&draft.headers);
+            if auth == content::AuthKind::None {
+                format!("Request · {}", draft.body_kind.label())
+            } else {
+                format!("Request · {} · {}", draft.body_kind.label(), auth.label())
+            }
+        }
         None => "Request".to_string(),
     };
     let block = Block::bordered()
@@ -49,7 +63,10 @@ pub(super) fn render(
     let [tabs, content] =
         Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(inner);
 
-    frame.render_widget(Tabs::new(["Headers", "Body"]).select(tab.index()), tabs);
+    frame.render_widget(
+        Tabs::new(["Headers", "Body", "Auth"]).select(tab.index()),
+        tabs,
+    );
     frame.render_widget(paragraph(draft, tab), content);
 }
 
@@ -74,5 +91,12 @@ fn paragraph(draft: Option<&Draft>, tab: RequestTab) -> Paragraph<'_> {
                 Paragraph::new(content::body_text(body, draft.body_kind)).wrap(Wrap { trim: false })
             }
         },
+        RequestTab::Auth => {
+            let lines = content::auth_lines(&draft.headers);
+            if lines.is_empty() {
+                return Paragraph::new("No auth").style(view::dim());
+            }
+            Paragraph::new(lines).wrap(Wrap { trim: false })
+        }
     }
 }

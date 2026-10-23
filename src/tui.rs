@@ -7,10 +7,10 @@ use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
-    widgets::{ListState, Paragraph},
+    widgets::{ListState, Paragraph, ScrollDirection::Forward},
 };
 
-use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use rully_core::errors::AppError;
 use rully_core::store;
 use rully_core::{http_file, request::Request};
@@ -37,7 +37,7 @@ use request_panel::RequestTab;
 mod response_panel;
 
 mod content;
-use content::{BODY_KINDS, BodyKind};
+use content::{AUTH_KINDS, AuthKind, BODY_KINDS, BodyKind};
 
 #[derive(Debug)]
 struct App {
@@ -56,6 +56,7 @@ struct App {
     focus: Focus,
     method_menu: Menu, // the method picker: open flag + highlighted entry
     body_menu: Menu,   // the body type picker, anchored under the request panel
+    auth_menu: Menu,   // the auth type picker, anchored under the request panel
 
     // Event loop.
     exit: bool,
@@ -108,6 +109,47 @@ impl Draft {
         if let Some(content_type) = kind.content_type() {
             self.headers
                 .insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
+        }
+    }
+
+    /// Applies an auth type chosen in the UI to the draft.
+    ///
+    /// Auth is derived from headers and the type is never stored in the file.
+    fn set_auth_kind(&mut self, kind: AuthKind) {
+        let current = AuthKind::of(&self.headers);
+        if current == kind {
+            return;
+        }
+
+        // Remove only known auth headers
+        if let Some(value) = self.headers.get(AUTHORIZATION).cloned() {
+            if let Ok(value) = value.to_str() {
+                if let Some(scheme) = value.split_whitespace().next() {
+                    if scheme.eq_ignore_ascii_case("bearer") || scheme.eq_ignore_ascii_case("basic")
+                    {
+                        self.headers.remove(AUTHORIZATION);
+                    }
+                }
+            }
+        }
+        self.headers.remove("x-api-key");
+
+        match kind {
+            AuthKind::None => {}
+            AuthKind::Bearer => {
+                self.headers
+                    .insert(AUTHORIZATION, HeaderValue::from_static("Bearer"));
+            }
+            AuthKind::Basic => {
+                self.headers
+                    .insert(AUTHORIZATION, HeaderValue::from_static("Basic"));
+            }
+            AuthKind::ApiKey => {
+                self.headers.insert(
+                    HeaderName::from_static("x-api-key"),
+                    HeaderValue::from_static(""),
+                );
+            }
         }
     }
 }
@@ -170,6 +212,7 @@ impl App {
             focus: Focus::LeftPanel,
             method_menu: Menu::new(),
             body_menu: Menu::new(),
+            auth_menu: Menu::new(),
             exit: false,
         };
         app.refresh();
@@ -237,7 +280,7 @@ impl App {
         );
         response_panel::render(frame, response, self.focus == Focus::Response);
 
-        let menu_open = self.method_menu.open || self.body_menu.open;
+        let menu_open = self.method_menu.open || self.body_menu.open || self.auth_menu.open;
 
         frame.render_widget(
             Paragraph::new(keys::help_line(keys::current_binding(
@@ -269,6 +312,17 @@ impl App {
             };
             methods_menu::render(frame, popup, &labels, self.body_menu.index);
         }
+
+        if self.auth_menu.open {
+            let labels = AUTH_KINDS.map(AuthKind::label);
+            let popup = Rect {
+                x: request.x + 1,
+                y: request.y + 2,
+                width: 12,
+                height: 6,
+            };
+            methods_menu::render(frame, popup, &labels, self.auth_menu.index);
+        }
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -287,7 +341,7 @@ impl App {
         let Some(binding) = keys::current_binding(
             self.focus,
             self.location.as_deref(),
-            self.method_menu.open || self.body_menu.open,
+            self.method_menu.open || self.body_menu.open || self.auth_menu.open,
         )
         .iter()
         .find(|b| b.key == key_event.code) else {
@@ -311,10 +365,11 @@ impl App {
             Action::MenuConfirm => self.menu_confirm(),
             Action::MenuCancel => self.menu_cancel(),
 
-            Action::TabPrevious => self.switch_tab(),
-            Action::TabNext => self.switch_tab(),
+            Action::TabPrevious => self.switch_tab(false),
+            Action::TabNext => self.switch_tab(true),
             Action::OpenMethodMenu => self.open_method_menu(),
             Action::OpenBodyMenu => self.open_body_menu(),
+            Action::OpenAuthMenu => self.open_auth_menu(),
             Action::FocusLeftPanel => self.focus = Focus::LeftPanel,
         }
     }
@@ -433,7 +488,19 @@ impl App {
         };
 
         self.method_menu.close();
+        self.auth_menu.close();
         self.body_menu.show(index);
+    }
+
+    fn open_auth_menu(&mut self) {
+        let Some(draft) = self.draft.as_ref() else {
+            return;
+        };
+        let index = AuthKind::of(&draft.headers).index();
+
+        self.method_menu.close();
+        self.body_menu.close();
+        self.auth_menu.show(index);
     }
 
     fn menu_previous(&mut self) {
@@ -441,6 +508,8 @@ impl App {
             self.method_menu.previous(METHODS.len());
         } else if self.body_menu.open {
             self.body_menu.previous(BODY_KINDS.len());
+        } else if self.auth_menu.open {
+            self.auth_menu.previous(AUTH_KINDS.len());
         }
     }
 
@@ -449,6 +518,8 @@ impl App {
             self.method_menu.next(METHODS.len());
         } else if self.body_menu.open {
             self.body_menu.next(BODY_KINDS.len());
+        } else if self.auth_menu.open {
+            self.auth_menu.next(AUTH_KINDS.len());
         }
     }
 
@@ -463,16 +534,23 @@ impl App {
                 draft.set_body_kind(kind);
             }
             self.body_menu.close();
+        } else if self.auth_menu.open {
+            let kind = AUTH_KINDS[self.auth_menu.index];
+            if let Some(draft) = &mut self.draft {
+                draft.set_auth_kind(kind);
+            }
+            self.auth_menu.close();
         }
     }
 
     fn menu_cancel(&mut self) {
         self.method_menu.close();
         self.body_menu.close();
+        self.auth_menu.close();
     }
 
-    fn switch_tab(&mut self) {
-        self.request_tab = RequestTab::switch_tabs(self.request_tab);
+    fn switch_tab(&mut self, forward: bool) {
+        self.request_tab = RequestTab::switch_tabs(self.request_tab, forward);
     }
 }
 

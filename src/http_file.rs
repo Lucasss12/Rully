@@ -480,6 +480,9 @@ mod tests {
             "POST https://api.example.com/u\nContent-Type: text/plain\n\n\n\nbody\n",
             "POST https://api.example.com/u\nContent-Type: text/plain\n\n\n",
             "POST https://api.example.com/u\nContent-Type: text/plain\n\n   ",
+            "GET https://api.example.com\nAuthorization: Bearer",
+            "GET https://api.example.com\nAuthorization: Basic",
+            "GET https://api.example.com\nX-API-Key:",
         ];
 
         for source in sources {

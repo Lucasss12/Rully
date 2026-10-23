@@ -112,6 +112,83 @@ impl BodyKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AuthKind {
+    None,
+    Bearer,
+    Basic,
+    ApiKey,
+}
+
+/// The auth kinds in the order the type menu lists them.
+pub(super) const AUTH_KINDS: [AuthKind; 4] = [
+    AuthKind::None,
+    AuthKind::Bearer,
+    AuthKind::Basic,
+    AuthKind::ApiKey,
+];
+
+impl AuthKind {
+    /// Classifies auth from what the wire already knows: headers only.
+    /// Precedence: Authorization (Bearer/Basic) takes precedence over X-API-Key.
+    pub(super) fn of(headers: &HeaderMap) -> Self {
+        if let Some(value) = headers.get("authorization") {
+            if let Ok(value) = value.to_str() {
+                if let Some(scheme) = value.split_whitespace().next() {
+                    if scheme.eq_ignore_ascii_case("bearer") {
+                        return Self::Bearer;
+                    }
+                    if scheme.eq_ignore_ascii_case("basic") {
+                        return Self::Basic;
+                    }
+                }
+            }
+        }
+
+        if headers.contains_key("x-api-key") {
+            return Self::ApiKey;
+        }
+
+        Self::None
+    }
+
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Bearer => "bearer",
+            Self::Basic => "basic",
+            Self::ApiKey => "api key",
+        }
+    }
+
+    pub(super) fn index(self) -> usize {
+        match self {
+            Self::None => 0,
+            Self::Bearer => 1,
+            Self::Basic => 2,
+            Self::ApiKey => 3,
+        }
+    }
+}
+
+pub(super) fn auth_lines(headers: &HeaderMap) -> Vec<Line<'_>> {
+    match AuthKind::of(headers) {
+        AuthKind::None => Vec::new(),
+        AuthKind::Bearer => vec![Line::from(vec![
+            Span::styled("authorization:  ", Style::new().fg(Color::Yellow)),
+            Span::raw("Bearer [redacted]"),
+        ])],
+        AuthKind::Basic => vec![Line::from(vec![
+            Span::styled("authorization:  ", Style::new().fg(Color::Yellow)),
+            Span::raw("Basic [redacted]"),
+        ])],
+        AuthKind::ApiKey => vec![Line::from(vec![
+            Span::styled("x-api-key:  ", Style::new().fg(Color::Yellow)),
+            Span::raw("[redacted]"),
+        ])],
+    }
+}
+
 pub(super) fn body_text<'a>(body: &'a str, kind: BodyKind) -> Text<'a> {
     match kind {
         BodyKind::Json => match pretty_json(body) {
@@ -358,5 +435,74 @@ mod tests {
         let text = body_text("kept in the draft", BodyKind::None);
 
         assert!(text.lines.is_empty());
+    }
+
+    #[test]
+    fn detects_bearer_auth() {
+        let headers = headers(&[("authorization", "Bearer abc123")]);
+        assert_eq!(AuthKind::of(&headers), AuthKind::Bearer);
+    }
+
+    #[test]
+    fn detects_basic_auth_case_insensitive() {
+        let headers = headers(&[("Authorization", "basic dXNlcjpwYXNz")]);
+        assert_eq!(AuthKind::of(&headers), AuthKind::Basic);
+    }
+
+    #[test]
+    fn detects_api_key_auth() {
+        let headers = headers(&[("x-api-key", "secret")]);
+        assert_eq!(AuthKind::of(&headers), AuthKind::ApiKey);
+    }
+
+    #[test]
+    fn auth_precedence_authorization_over_api_key() {
+        let headers = headers(&[("authorization", "Bearer abc123"), ("x-api-key", "secret")]);
+        assert_eq!(AuthKind::of(&headers), AuthKind::Bearer);
+    }
+
+    #[test]
+    fn detects_bearer_auth_with_empty_value() {
+        let headers = headers(&[("authorization", "Bearer")]);
+        assert_eq!(AuthKind::of(&headers), AuthKind::Bearer);
+    }
+
+    #[test]
+    fn detects_basic_auth_with_empty_value() {
+        let headers = headers(&[("authorization", "Basic")]);
+        assert_eq!(AuthKind::of(&headers), AuthKind::Basic);
+    }
+
+    #[test]
+    fn auth_none_when_unknown_scheme() {
+        let headers = headers(&[("authorization", "Custom abc123")]);
+        assert_eq!(AuthKind::of(&headers), AuthKind::None);
+    }
+
+    #[test]
+    fn maps_each_auth_kind_to_its_label_and_index() {
+        assert_eq!(AuthKind::None.label(), "none");
+        assert_eq!(AuthKind::Bearer.label(), "bearer");
+        assert_eq!(AuthKind::Basic.label(), "basic");
+        assert_eq!(AuthKind::ApiKey.label(), "api key");
+        for (index, kind) in AUTH_KINDS.iter().enumerate() {
+            assert_eq!(kind.index(), index);
+        }
+    }
+
+    #[test]
+    fn auth_lines_for_bearer() {
+        let headers = headers(&[("authorization", "Bearer abc123")]);
+        let lines = auth_lines(&headers);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].to_string().contains("[redacted]"));
+        assert!(!lines[0].to_string().contains("abc123"));
+    }
+
+    #[test]
+    fn auth_lines_for_none() {
+        let headers = HeaderMap::new();
+        let lines = auth_lines(&headers);
+        assert!(lines.is_empty());
     }
 }

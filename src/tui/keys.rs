@@ -21,6 +21,10 @@ pub(super) enum Action {
     OpenBodyMenu,
     OpenAuthMenu,
     FocusLeftPanel,
+
+    EditUrl,
+    SubmitEditUrl,
+    CancelEditUrl,
 }
 
 pub(super) struct Binding {
@@ -135,6 +139,11 @@ const REQUEST_BAR_KEYS: &[Binding] = &[
         action: Action::OpenMethodMenu,
     },
     Binding {
+        key: KeyCode::Char('e'),
+        help: "e edit url",
+        action: Action::EditUrl,
+    },
+    Binding {
         key: KeyCode::Tab,
         help: "tab",
         action: Action::NextFocus,
@@ -202,16 +211,29 @@ const RESPONSE_KEYS: &[Binding] = &[
     },
 ];
 
-pub(super) fn current_binding(
-    focus: Focus,
-    open: Option<&str>,
-    menu_open: bool,
-) -> &'static [Binding] {
+const URL_EDIT_KEYS: &[Binding] = &[
+    Binding {
+        key: KeyCode::Esc,
+        help: "esc cancel",
+        action: Action::CancelEditUrl,
+    },
+    Binding {
+        key: KeyCode::Enter,
+        help: "↵ save",
+        action: Action::SubmitEditUrl,
+    },
+];
+
+pub(super) fn current_binding( focus: Focus, open: Option<&str>, menu_open: bool, url_editing: bool, ) -> &'static [Binding] {
+    if url_editing && focus == Focus::RequestBar {
+        return URL_EDIT_KEYS;
+    }
     if menu_open {
         return MENU_KEYS;
     }
 
     match focus {
+        Focus::RequestBar if url_editing => URL_EDIT_KEYS,
         Focus::LeftPanel => match open {
             None => ROOT_KEYS,
             Some(_) => COLLECTION_KEYS,

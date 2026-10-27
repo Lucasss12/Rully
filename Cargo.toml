@@ -13,3 +13,5 @@ tokio = { version = "1", features = ["full"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 ratatui = "0.30"
 crossterm = "0.29.0"
+tui-input = "0.15.5"
+ratatui-textarea = "0.9.3"

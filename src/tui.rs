@@ -7,8 +7,9 @@ use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
-    widgets::{ListState, Paragraph, ScrollDirection::Forward},
+    widgets::{ListState, Paragraph},
 };
+use ratatui_textarea::TextArea;
 
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use rully_core::errors::AppError;
@@ -51,6 +52,8 @@ struct App {
     // Loaded request (request bar + request panel).
     draft: Option<Draft>,    // the request being viewed, once one is loaded
     request_tab: RequestTab, // active request tab: Headers or Body
+    display_url_input: bool,
+    url_input: TextArea<'static>,
 
     // Focus and the menus that float over the interface.
     focus: Focus,
@@ -207,13 +210,21 @@ impl App {
             error: None,
             state: ListState::default(),
             location: None,
-            draft: None,
+            draft: Some(Draft {
+                method_index: 0,
+                url: String::new(),
+                headers: HeaderMap::new(),
+                body: None,
+                body_kind: BodyKind::None,
+            }),
             request_tab: RequestTab::Headers,
             focus: Focus::LeftPanel,
             method_menu: Menu::new(),
             body_menu: Menu::new(),
             auth_menu: Menu::new(),
             exit: false,
+            display_url_input: false,
+            url_input: TextArea::default(),
         };
         app.refresh();
         app
@@ -270,7 +281,14 @@ impl App {
         );
 
         let draft = self.draft.as_ref();
-        request_bar::render(frame, bar, draft, self.focus == Focus::RequestBar);
+        request_bar::render(
+            frame,
+            bar,
+            draft,
+            self.focus == Focus::RequestBar,
+            self.display_url_input,
+            &self.url_input,
+        );
         request_panel::render(
             frame,
             request,
@@ -287,6 +305,7 @@ impl App {
                 self.focus,
                 self.location.as_deref(),
                 menu_open,
+                self.display_url_input,
             ))),
             help,
         );
@@ -338,17 +357,21 @@ impl App {
     /// Looks the key up in the table for the current focus (or the method menu
     /// when it is open) and dispatches the matching action.
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        let Some(binding) = keys::current_binding(
-            self.focus,
-            self.location.as_deref(),
-            self.method_menu.open || self.body_menu.open || self.auth_menu.open,
-        )
-        .iter()
-        .find(|b| b.key == key_event.code) else {
-            return;
-        };
+        let url_editing = self.focus == Focus::RequestBar && self.display_url_input;
+        let menu_open = self.method_menu.open || self.body_menu.open || self.auth_menu.open;
 
-        self.dispatch(binding.action);
+        let bindings =
+            keys::current_binding(self.focus, self.location.as_deref(), menu_open, url_editing);
+
+        if let Some(binding) = bindings.iter().find(|b| b.key == key_event.code) {
+            self.dispatch(binding.action);
+            return;
+        }
+
+        if url_editing {
+            self.url_input.input(key_event);
+            return;
+        }
     }
 
     fn dispatch(&mut self, action: Action) {
@@ -371,6 +394,10 @@ impl App {
             Action::OpenBodyMenu => self.open_body_menu(),
             Action::OpenAuthMenu => self.open_auth_menu(),
             Action::FocusLeftPanel => self.focus = Focus::LeftPanel,
+
+            Action::EditUrl => self.edit_url(),
+            Action::SubmitEditUrl => self.submit_url(),
+            Action::CancelEditUrl => self.cancel_edit_url(),
         }
     }
 
@@ -433,7 +460,10 @@ impl App {
         }
 
         match Self::read_draft(&self.root, &format!("{collection}/{entry}")) {
-            Ok(draft) => self.draft = Some(draft),
+            Ok(draft) => {
+                self.url_input = TextArea::new(draft.url.lines().map(|s| s.to_string()).collect());
+                self.draft = Some(draft);
+            }
             Err(error) => self.error = Some(error.to_string()),
         }
     }
@@ -551,6 +581,23 @@ impl App {
 
     fn switch_tab(&mut self, forward: bool) {
         self.request_tab = RequestTab::switch_tabs(self.request_tab, forward);
+    }
+
+    fn edit_url(&mut self) {
+        self.display_url_input = !self.display_url_input
+    }
+
+    fn submit_url(&mut self) {
+        let url = self.url_input.lines().join("\n");
+
+        if let Some(draft) = self.draft.as_mut() {
+            draft.url = url;
+        }
+        self.cancel_edit_url();
+    }
+
+    fn cancel_edit_url(&mut self) {
+        self.display_url_input = false;
     }
 }
 

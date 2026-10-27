@@ -1830,6 +1830,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatui-textarea"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78cdce79220909bec1bb8307c29fad7d0df7434280da6ecaf44cb208393bed00"
+dependencies = [
+ "ratatui-core",
+ "ratatui-crossterm",
+ "ratatui-widgets",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
 name = "ratatui-widgets"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1946,9 +1959,11 @@ dependencies = [
  "clap",
  "crossterm",
  "ratatui",
+ "ratatui-textarea",
  "reqwest",
  "serde_json",
  "tokio",
+ "tui-input",
 ]
 
 [[package]]
@@ -2681,6 +2696,17 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "tui-input"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4fa0cb7933d19f91eb3109781bf7297d5e4cba57e857d97a29b9465d3383f56"
+dependencies = [
+ "ratatui",
+ "unicode-segmentation",
+ "unicode-width",
+]
 
 [[package]]
 name = "typenum"

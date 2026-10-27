@@ -159,13 +159,13 @@ The MVP should provide:
 **Goal:** a launchable TUI over features that already exist. Nothing new is
 introduced here, so nothing here can surprise us.
 
-- [ ] Add `ratatui`, keep the core independent of it
-- [ ] Build the test harness first: synthesised key events, assertions
+- [x] Add `ratatui`, keep the core independent of it
+- [x] Build the test harness first: synthesised key events, assertions
       against the `TestBackend` buffer
-- [ ] Launch the TUI with `rully`
-- [ ] Render the collections tree
-- [ ] Load a request on selection
-- [ ] Display method, URL, headers and body read-only
+- [x] Launch the TUI with `rully`
+- [x] Render the collections tree
+- [x] Load a request on selection
+- [x] Display method, URL, headers and body read-only
 
 ---
 
@@ -174,7 +174,7 @@ introduced here, so nothing here can surprise us.
 **Goal:** the point where the remaining features get demanded by a screen
 rather than by a plan.
 
-- [ ] Body types: json, text, form, none
+- [x] Body types: json, text, form, none
 - [ ] Auth: bearer, basic, api key — and where it lives in `.http`
 - [ ] Edit URL and method
 - [ ] Edit headers and body

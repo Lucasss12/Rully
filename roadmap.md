@@ -175,9 +175,9 @@ introduced here, so nothing here can surprise us.
 rather than by a plan.
 
 - [x] Body types: json, text, form, none
-- [ ] Auth: bearer, basic, api key — and where it lives in `.http`
-- [ ] Edit URL and method
-- [ ] Edit headers and body
+- [x] Auth: bearer, basic, api key — and where it lives in `.http`
+- [x] Edit URL and method
+- [x] Edit headers, body and auth
 - [ ] Save back to `.http`, keeping comments intact
 - [ ] Mouse selection, clipboard via OSC 52
 

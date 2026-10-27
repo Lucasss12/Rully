@@ -3,13 +3,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
     widgets::{ListState, Paragraph},
 };
-use ratatui_textarea::TextArea;
+use ratatui_textarea::{CursorMove, TextArea};
 
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use rully_core::errors::AppError;
@@ -52,8 +53,9 @@ struct App {
     // Loaded request (request bar + request panel).
     draft: Option<Draft>,    // the request being viewed, once one is loaded
     request_tab: RequestTab, // active request tab: Headers or Body
-    display_url_input: bool,
-    url_input: TextArea<'static>,
+
+    edit_mode: EditMode,
+    edit_input: TextArea<'static>,
 
     // Focus and the menus that float over the interface.
     focus: Focus,
@@ -125,15 +127,17 @@ impl Draft {
         }
 
         // Remove only known auth headers
-        if let Some(value) = self.headers.get(AUTHORIZATION).cloned() {
-            if let Ok(value) = value.to_str() {
-                if let Some(scheme) = value.split_whitespace().next() {
-                    if scheme.eq_ignore_ascii_case("bearer") || scheme.eq_ignore_ascii_case("basic")
-                    {
-                        self.headers.remove(AUTHORIZATION);
-                    }
-                }
-            }
+        let known_scheme = self
+            .headers
+            .get(AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split_whitespace().next())
+            .is_some_and(|scheme| {
+                scheme.eq_ignore_ascii_case("bearer") || scheme.eq_ignore_ascii_case("basic")
+            });
+
+        if known_scheme {
+            self.headers.remove(AUTHORIZATION);
         }
         self.headers.remove("x-api-key");
 
@@ -154,6 +158,129 @@ impl Draft {
                 );
             }
         }
+    }
+
+    fn set_url(&mut self, url: &str) {
+        self.url = url.trim().to_string();
+    }
+
+    fn set_body(&mut self, body: &str) -> Result<(), AppError> {
+        if self.body_kind == BodyKind::Json && !body.trim().is_empty() {
+            serde_json::from_str::<serde_json::Value>(body).map_err(AppError::InvalidJson)?;
+        }
+
+        self.body = if body.is_empty() {
+            None
+        } else {
+            Some(body.to_string())
+        };
+        self.refresh_body_kind();
+        Ok(())
+    }
+
+    fn set_headers_from_text(&mut self, text: &str) -> Result<(), AppError> {
+        self.headers = content::parse_headers(text)?;
+        self.refresh_body_kind();
+        Ok(())
+    }
+
+    fn headers_text(&self) -> Result<String, AppError> {
+        content::headers_text(&self.headers)
+    }
+
+    /// The editable auth value: the token for Bearer, `user:pass` for Basic,
+    /// and the key itself for API key. `None` means there is no auth to edit.
+    fn auth_value(&self) -> Option<String> {
+        let authorization = self
+            .headers
+            .get(AUTHORIZATION)
+            .and_then(|value| value.to_str().ok());
+
+        match AuthKind::of(&self.headers) {
+            AuthKind::None => None,
+            AuthKind::Bearer => Some(
+                authorization
+                    .and_then(|value| value.split_once(' '))
+                    .map(|(_, token)| token.trim().to_string())
+                    .unwrap_or_default(),
+            ),
+            AuthKind::Basic => Some(
+                authorization
+                    .and_then(|value| value.split_once(' '))
+                    .and_then(|(_, token)| STANDARD.decode(token).ok())
+                    .and_then(|bytes| String::from_utf8(bytes).ok())
+                    .unwrap_or_default(),
+            ),
+            AuthKind::ApiKey => Some(
+                self.headers
+                    .get("x-api-key")
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
+        }
+    }
+
+    fn set_auth_value(&mut self, value: &str) -> Result<(), AppError> {
+        let value = value.trim();
+
+        let header = match AuthKind::of(&self.headers) {
+            AuthKind::None => return Ok(()),
+            AuthKind::Bearer => {
+                if value.is_empty() {
+                    "Bearer".to_string()
+                } else {
+                    format!("Bearer {value}")
+                }
+            }
+            AuthKind::Basic => {
+                if value.is_empty() {
+                    "Basic".to_string()
+                } else if value.contains(':') {
+                    format!("Basic {}", STANDARD.encode(value))
+                } else {
+                    return Err(AppError::InvalidHeader(
+                        "Basic credentials must be user:password".to_string(),
+                    ));
+                }
+            }
+            AuthKind::ApiKey => {
+                let header_value = HeaderValue::from_str(value)
+                    .map_err(|_| AppError::InvalidHeader("invalid API key value".to_string()))?;
+                self.headers
+                    .insert(HeaderName::from_static("x-api-key"), header_value);
+                return Ok(());
+            }
+        };
+
+        let header_value = HeaderValue::from_str(&header)
+            .map_err(|_| AppError::InvalidHeader("invalid authorization value".to_string()))?;
+        self.headers.insert(AUTHORIZATION, header_value);
+        Ok(())
+    }
+
+    /// Reclassifies the body after an edit changed its presence or `Content-Type`.
+    /// An explicit `None` stays hidden.
+    fn refresh_body_kind(&mut self) {
+        if self.body_kind != BodyKind::None {
+            self.body_kind = BodyKind::of(&self.headers, self.body.as_deref());
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EditMode {
+    None,
+    Url,
+    Headers,
+    Body,
+    Auth,
+}
+
+impl EditMode {
+    /// Whether the editor accepts `Enter` as a line break instead of ignoring it.
+    fn allows_newline(self) -> bool {
+        matches!(self, Self::Headers | Self::Body)
     }
 }
 
@@ -223,8 +350,8 @@ impl App {
             body_menu: Menu::new(),
             auth_menu: Menu::new(),
             exit: false,
-            display_url_input: false,
-            url_input: TextArea::default(),
+            edit_mode: EditMode::None,
+            edit_input: TextArea::default(),
         };
         app.refresh();
         app
@@ -286,8 +413,8 @@ impl App {
             bar,
             draft,
             self.focus == Focus::RequestBar,
-            self.display_url_input,
-            &self.url_input,
+            &self.edit_input,
+            self.edit_mode,
         );
         request_panel::render(
             frame,
@@ -295,6 +422,8 @@ impl App {
             draft,
             self.request_tab,
             self.focus == Focus::Request,
+            self.edit_mode,
+            &self.edit_input,
         );
         response_panel::render(frame, response, self.focus == Focus::Response);
 
@@ -305,7 +434,7 @@ impl App {
                 self.focus,
                 self.location.as_deref(),
                 menu_open,
-                self.display_url_input,
+                self.edit_mode,
             ))),
             help,
         );
@@ -357,20 +486,29 @@ impl App {
     /// Looks the key up in the table for the current focus (or the method menu
     /// when it is open) and dispatches the matching action.
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        let url_editing = self.focus == Focus::RequestBar && self.display_url_input;
         let menu_open = self.method_menu.open || self.body_menu.open || self.auth_menu.open;
+        let editing = self.edit_mode != EditMode::None;
 
-        let bindings =
-            keys::current_binding(self.focus, self.location.as_deref(), menu_open, url_editing);
+        let bindings = keys::current_binding(
+            self.focus,
+            self.location.as_deref(),
+            menu_open,
+            self.edit_mode,
+        );
 
-        if let Some(binding) = bindings.iter().find(|b| b.key == key_event.code) {
+        if let Some(binding) = bindings
+            .iter()
+            .find(|b| b.key == key_event.code && b.modifiers == key_event.modifiers)
+        {
             self.dispatch(binding.action);
             return;
         }
 
-        if url_editing {
-            self.url_input.input(key_event);
-            return;
+        if editing {
+            if key_event.code == KeyCode::Enter && !self.edit_mode.allows_newline() {
+                return;
+            }
+            self.edit_input.input(key_event);
         }
     }
 
@@ -395,9 +533,10 @@ impl App {
             Action::OpenAuthMenu => self.open_auth_menu(),
             Action::FocusLeftPanel => self.focus = Focus::LeftPanel,
 
-            Action::EditUrl => self.edit_url(),
-            Action::SubmitEditUrl => self.submit_url(),
-            Action::CancelEditUrl => self.cancel_edit_url(),
+            Action::EditUrl => self.start_edit(EditMode::Url),
+            Action::EditCurrent => self.edit_current_tab(),
+            Action::SubmitEdit => self.submit_edit(),
+            Action::CancelEdit => self.cancel_edit(),
         }
     }
 
@@ -461,7 +600,7 @@ impl App {
 
         match Self::read_draft(&self.root, &format!("{collection}/{entry}")) {
             Ok(draft) => {
-                self.url_input = TextArea::new(draft.url.lines().map(|s| s.to_string()).collect());
+                self.cancel_edit();
                 self.draft = Some(draft);
             }
             Err(error) => self.error = Some(error.to_string()),
@@ -486,6 +625,7 @@ impl App {
 
     /// Steps back up from a collection to the list of collections.
     fn go_back(&mut self) {
+        self.cancel_edit();
         if self.location.take().is_some() {
             self.refresh();
         }
@@ -583,21 +723,88 @@ impl App {
         self.request_tab = RequestTab::switch_tabs(self.request_tab, forward);
     }
 
-    fn edit_url(&mut self) {
-        self.display_url_input = !self.display_url_input
+    fn edit_current_tab(&mut self) {
+        let mode = match self.request_tab {
+            RequestTab::Headers => EditMode::Headers,
+            RequestTab::Body => EditMode::Body,
+            RequestTab::Auth => EditMode::Auth,
+        };
+        self.start_edit(mode);
     }
 
-    fn submit_url(&mut self) {
-        let url = self.url_input.lines().join("\n");
+    fn start_edit(&mut self, mode: EditMode) {
+        let Some(draft) = self.draft.as_ref() else {
+            return;
+        };
 
-        if let Some(draft) = self.draft.as_mut() {
-            draft.url = url;
+        let text = match mode {
+            EditMode::None => return,
+            EditMode::Url => Ok(draft.url.clone()),
+            EditMode::Body if draft.body_kind == BodyKind::None => return,
+            EditMode::Body => {
+                let body = draft.body.clone().unwrap_or_default();
+                match draft.body_kind {
+                    BodyKind::Json => Ok(content::pretty_json(&body).unwrap_or(body)),
+                    _ => Ok(body),
+                }
+            }
+            EditMode::Headers => draft.headers_text(),
+            EditMode::Auth => match draft.auth_value() {
+                Some(value) => Ok(value),
+                None => return,
+            },
+        };
+
+        let text = match text {
+            Ok(text) => text,
+            Err(error) => {
+                self.error = Some(error.to_string());
+                return;
+            }
+        };
+
+        self.method_menu.close();
+        self.body_menu.close();
+        self.auth_menu.close();
+
+        self.edit_input = TextArea::new(text.lines().map(str::to_string).collect());
+        self.edit_input.move_cursor(CursorMove::Bottom);
+        self.edit_input.move_cursor(CursorMove::End);
+        self.edit_mode = mode;
+    }
+
+    fn submit_edit(&mut self) {
+        let text = self.edit_input.lines().join("\n");
+        let mode = self.edit_mode;
+
+        let Some(draft) = self.draft.as_mut() else {
+            self.cancel_edit();
+            return;
+        };
+
+        let result = match mode {
+            EditMode::None => Ok(()),
+            EditMode::Url => {
+                draft.set_url(&text);
+                Ok(())
+            }
+            EditMode::Body => draft.set_body(&text),
+            EditMode::Headers => draft.set_headers_from_text(&text),
+            EditMode::Auth => draft.set_auth_value(&text),
+        };
+
+        match result {
+            Ok(()) => {
+                self.error = None;
+                self.cancel_edit();
+            }
+            Err(error) => self.error = Some(error.to_string()),
         }
-        self.cancel_edit_url();
     }
 
-    fn cancel_edit_url(&mut self) {
-        self.display_url_input = false;
+    fn cancel_edit(&mut self) {
+        self.edit_mode = EditMode::None;
+        self.edit_input = TextArea::default();
     }
 }
 

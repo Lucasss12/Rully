@@ -19,7 +19,21 @@ fn draw(app: &mut App, terminal: &mut TestTerminal) {
 }
 
 fn press(app: &mut App, code: KeyCode) {
-    app.handle_key_event(KeyEvent::new(code, KeyModifiers::NONE));
+    press_with(app, code, KeyModifiers::NONE);
+}
+
+fn press_with(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    app.handle_key_event(KeyEvent::new(code, modifiers));
+}
+
+fn save(app: &mut App) {
+    press_with(app, KeyCode::Char('s'), KeyModifiers::CONTROL);
+}
+
+fn type_text(app: &mut App, text: &str) {
+    for character in text.chars() {
+        press(app, KeyCode::Char(character));
+    }
 }
 
 fn lines(terminal: &TestTerminal) -> Vec<String> {
@@ -107,8 +121,8 @@ fn draws_the_initial_screen() {
     assert!(text.contains("auth/"), "{text}");
     assert!(text.contains("users/"), "{text}");
     assert!(text.contains("[1 of 2]"), "{text}");
-    assert!(text.contains("Select a request"), "{text}");
-    assert!(text.contains("No request selected"), "{text}");
+    assert!(text.contains("Enter URL..."), "{text}");
+    assert!(text.contains("No headers"), "{text}");
     assert!(text.contains("No response yet"), "{text}");
     assert!(text.contains("q quit"), "{text}");
 }
@@ -163,7 +177,7 @@ fn opens_collection_and_goes_back() {
     assert!(text.contains("Collections/users"), "{text}");
     assert!(text.contains("create.http"), "{text}");
     assert!(text.contains("list.http"), "{text}");
-    assert!(text.contains("No request selected"), "{text}");
+    assert!(text.contains("No headers"), "{text}");
 
     press(&mut app, KeyCode::Esc);
     draw(&mut app, &mut terminal);
@@ -197,7 +211,7 @@ fn loads_request_into_the_bar() {
 }
 
 #[test]
-fn redacts_sensitive_headers() {
+fn shows_sensitive_headers_in_clear() {
     let fixture = Fixture::with(
         "redact-headers",
         &["users"],
@@ -218,8 +232,8 @@ fn redacts_sensitive_headers() {
 
     let text = screen(&terminal);
     assert!(text.contains("application/json"), "{text}");
-    assert!(text.contains("[redacted]"), "{text}");
-    assert!(!text.contains("secret"), "{text}");
+    assert!(text.contains("Bearer secret"), "{text}");
+    assert!(!text.contains("[redacted]"), "{text}");
 }
 
 #[test]
@@ -282,8 +296,7 @@ fn confirms_a_new_method() {
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Char('b'));
+    press(&mut app, KeyCode::Char('m'));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Enter);
     draw(&mut app, &mut terminal);
@@ -376,7 +389,7 @@ fn ignores_enter_in_an_empty_collection() {
     );
 
     press(&mut app, KeyCode::Enter);
-    assert!(app.draft.is_none());
+    assert!(app.draft.as_ref().is_some_and(|draft| draft.url.is_empty()));
 }
 
 #[test]
@@ -454,7 +467,7 @@ fn reports_an_invalid_request_file() {
     draw(&mut app, &mut terminal);
 
     assert!(app.error.is_some());
-    assert!(app.draft.is_none());
+    assert!(app.draft.as_ref().is_some_and(|draft| draft.url.is_empty()));
     assert!(
         screen(&terminal).contains("Invalid request file"),
         "{}",
@@ -655,13 +668,11 @@ fn choosing_none_hides_the_body_without_losing_it() {
     );
     assert!(screen(&terminal).contains("Request · none"));
 
-    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Right);
     draw(&mut app, &mut terminal);
     assert!(screen(&terminal).contains("No body"));
 
     press(&mut app, KeyCode::Left);
-    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Char('b'));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Enter);
@@ -679,7 +690,6 @@ fn choosing_none_hides_the_body_without_losing_it() {
     );
     assert!(screen(&terminal).contains("Request · json"));
 
-    press(&mut app, KeyCode::Tab);
     press(&mut app, KeyCode::Right);
     draw(&mut app, &mut terminal);
     assert!(screen(&terminal).contains("\"name\": \"John\""));
@@ -718,6 +728,7 @@ fn shows_form_pairs_on_the_body_tab() {
 fn ignores_b_without_a_request() {
     let fixture = Fixture::with("body-menu-no-draft", &["users"], &[]);
     let mut app = App::new(fixture.root());
+    app.draft = None;
     let mut terminal = terminal();
 
     draw(&mut app, &mut terminal);
@@ -727,6 +738,389 @@ fn ignores_b_without_a_request() {
 
     assert!(!app.body_menu.open);
     assert!(app.draft.is_none());
+}
+
+#[test]
+fn edits_the_url_and_saves_with_ctrl_s() {
+    let fixture = Fixture::new("edit-url");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('e'));
+
+    assert_eq!(app.edit_mode, EditMode::Url);
+
+    type_text(&mut app, "/search?q=rule");
+
+    assert_eq!(app.edit_mode, EditMode::Url);
+    assert_eq!(
+        app.draft.as_ref().unwrap().url,
+        "https://api.example.com/users"
+    );
+
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.edit_mode, EditMode::Url);
+    assert_eq!(app.edit_input.lines().len(), 1);
+
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::None);
+    assert_eq!(
+        app.draft.as_ref().unwrap().url,
+        "https://api.example.com/users/search?q=rule"
+    );
+}
+
+#[test]
+fn escape_cancels_url_editing() {
+    let fixture = Fixture::new("cancel-url-edit");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('e'));
+    type_text(&mut app, "/discarded");
+    press(&mut app, KeyCode::Esc);
+
+    assert_eq!(app.edit_mode, EditMode::None);
+    assert_eq!(
+        app.draft.as_ref().unwrap().url,
+        "https://api.example.com/users"
+    );
+}
+
+#[test]
+fn edits_the_body_with_newlines() {
+    let fixture = Fixture::with(
+        "edit-body",
+        &["users"],
+        &[(
+            "users/create.http",
+            "POST https://api.example.com/users\n\
+             Content-Type: text/plain\n\n\
+             line one",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('e'));
+
+    assert_eq!(app.edit_mode, EditMode::Body);
+
+    press(&mut app, KeyCode::Enter);
+    type_text(&mut app, "second line");
+    save(&mut app);
+
+    let draft = app.draft.as_ref().unwrap();
+    assert_eq!(draft.body.as_deref(), Some("line one\nsecond line"));
+    assert_eq!(draft.body_kind, BodyKind::Text);
+}
+
+#[test]
+fn seeds_the_json_body_pretty_printed() {
+    let body = r#"{"name":"John","age":30}"#;
+    let fixture = Fixture::with(
+        "edit-json-pretty",
+        &["users"],
+        &[(
+            "users/create.http",
+            "POST https://api.example.com/users\n\
+             Content-Type: application/json\n\n\
+             {\"name\":\"John\",\"age\":30}",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('e'));
+
+    let expected = content::pretty_json(body).unwrap();
+    assert_eq!(app.edit_input.lines().join("\n"), expected);
+}
+
+#[test]
+fn saves_edited_json_as_written() {
+    let fixture = Fixture::with(
+        "edit-json-as-written",
+        &["users"],
+        &[(
+            "users/create.http",
+            "POST https://api.example.com/users\n\
+             Content-Type: application/json\n\n\
+             {\"name\":\"John\"}",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('e'));
+
+    let edited = "{\n    \"name\": \"Jane\"\n}";
+    app.edit_input = TextArea::new(edited.lines().map(str::to_string).collect());
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::None);
+    assert_eq!(app.draft.as_ref().unwrap().body.as_deref(), Some(edited));
+}
+
+#[test]
+fn rejects_invalid_json_body() {
+    let fixture = Fixture::with(
+        "edit-json-invalid",
+        &["users"],
+        &[(
+            "users/create.http",
+            "POST https://api.example.com/users\n\
+             Content-Type: application/json\n\n\
+             {\"name\":\"John\"}",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('e'));
+
+    app.edit_input = TextArea::new(vec!["{invalid}".to_string()]);
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::Body);
+    assert!(app.error.is_some());
+    assert_eq!(
+        app.draft.as_ref().unwrap().body.as_deref(),
+        Some("{\"name\":\"John\"}")
+    );
+}
+
+#[test]
+fn edits_headers_as_text() {
+    let fixture = Fixture::new("edit-headers");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('e'));
+
+    assert_eq!(app.edit_mode, EditMode::Headers);
+
+    app.edit_input = TextArea::new(vec![
+        "Accept: text/plain".to_string(),
+        "X-Test: one".to_string(),
+        "X-Test: two".to_string(),
+    ]);
+    save(&mut app);
+
+    let draft = app.draft.as_ref().unwrap();
+    assert_eq!(
+        draft
+            .headers
+            .get("accept")
+            .and_then(|value| value.to_str().ok()),
+        Some("text/plain")
+    );
+    assert_eq!(draft.headers.get_all("x-test").iter().count(), 2);
+}
+
+#[test]
+fn keeps_editing_headers_after_an_invalid_line() {
+    let fixture = Fixture::new("invalid-header-edit");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('e'));
+
+    let before = app.draft.as_ref().unwrap().headers.clone();
+    app.edit_input = TextArea::new(vec!["missing separator".to_string()]);
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::Headers);
+    assert!(app.error.is_some());
+    assert_eq!(app.draft.as_ref().unwrap().headers, before);
+}
+
+#[test]
+fn edits_bearer_auth() {
+    let fixture = Fixture::with(
+        "edit-bearer",
+        &["users"],
+        &[(
+            "users/list.http",
+            "GET https://api.example.com/users\nAuthorization: Bearer old-token\n",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('e'));
+
+    assert_eq!(app.edit_mode, EditMode::Auth);
+    assert_eq!(app.edit_input.lines().join("\n"), "old-token");
+
+    app.edit_input = TextArea::new(vec!["new-token".to_string()]);
+    save(&mut app);
+
+    assert_eq!(
+        app.draft
+            .as_ref()
+            .unwrap()
+            .headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer new-token")
+    );
+}
+
+#[test]
+fn edits_basic_auth_as_user_and_password() {
+    let fixture = Fixture::with(
+        "edit-basic",
+        &["users"],
+        &[(
+            "users/list.http",
+            "GET https://api.example.com/users\nAuthorization: Basic dXNlcjpwYXNz\n",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('e'));
+
+    assert_eq!(app.edit_input.lines().join("\n"), "user:pass");
+
+    app.edit_input = TextArea::new(vec!["new:secret".to_string()]);
+    save(&mut app);
+
+    assert_eq!(
+        app.draft
+            .as_ref()
+            .unwrap()
+            .headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic bmV3OnNlY3JldA==")
+    );
+}
+
+#[test]
+fn rejects_basic_auth_without_a_colon() {
+    let fixture = Fixture::with(
+        "invalid-basic",
+        &["users"],
+        &[(
+            "users/list.http",
+            "GET https://api.example.com/users\nAuthorization: Basic dXNlcjpwYXNz\n",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('e'));
+
+    app.edit_input = TextArea::new(vec!["missing-colon".to_string()]);
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::Auth);
+    assert!(app.error.is_some());
+    assert_eq!(
+        app.draft
+            .as_ref()
+            .unwrap()
+            .headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic dXNlcjpwYXNz")
+    );
+}
+
+#[test]
+fn edits_api_key_auth() {
+    let fixture = Fixture::with(
+        "edit-api-key",
+        &["users"],
+        &[(
+            "users/list.http",
+            "GET https://api.example.com/users\nX-API-Key: old-key\n",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('e'));
+
+    assert_eq!(app.edit_input.lines().join("\n"), "old-key");
+
+    app.edit_input = TextArea::new(vec!["new-key".to_string()]);
+    save(&mut app);
+
+    assert_eq!(
+        app.draft
+            .as_ref()
+            .unwrap()
+            .headers
+            .get("x-api-key")
+            .and_then(|value| value.to_str().ok()),
+        Some("new-key")
+    );
+}
+
+#[test]
+fn does_not_edit_auth_when_none_is_selected() {
+    let fixture = Fixture::new("edit-no-auth");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('e'));
+
+    assert_eq!(app.edit_mode, EditMode::None);
 }
 
 #[test]

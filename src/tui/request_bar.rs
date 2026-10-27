@@ -6,15 +6,15 @@ use ratatui::{
 };
 use ratatui_textarea::TextArea;
 
-use super::{Draft, METHODS, view};
+use super::{Draft, EditMode, METHODS, view};
 
 pub(super) fn render(
     frame: &mut Frame,
     area: Rect,
     draft: Option<&Draft>,
     focused: bool,
-    display_url_input: bool,
-    url_input: &TextArea<'_>,
+    edit_input: &TextArea<'_>,
+    edit_mode: EditMode,
 ) {
     let block = Block::bordered().border_style(view::border_style(focused));
 
@@ -41,8 +41,8 @@ pub(super) fn render(
         method_area,
     );
 
-    if display_url_input {
-        frame.render_widget(url_input, url_area);
+    if edit_mode == EditMode::Url {
+        frame.render_widget(edit_input, url_area);
     } else {
         frame.render_widget(
             Paragraph::new(url)

@@ -3,8 +3,9 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     widgets::{Block, Paragraph, Tabs, Wrap},
 };
+use ratatui_textarea::TextArea;
 
-use super::{Draft, content, view};
+use super::{Draft, EditMode, content, view};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum RequestTab {
@@ -41,6 +42,8 @@ pub(super) fn render(
     draft: Option<&Draft>,
     tab: RequestTab,
     focused: bool,
+    edit_mode: EditMode,
+    edit_input: &TextArea<'_>,
 ) {
     let title = match draft {
         Some(draft) => {
@@ -67,7 +70,18 @@ pub(super) fn render(
         Tabs::new(["Headers", "Body", "Auth"]).select(tab.index()),
         tabs,
     );
-    frame.render_widget(paragraph(draft, tab), content);
+
+    let editing = match tab {
+        RequestTab::Headers => edit_mode == EditMode::Headers,
+        RequestTab::Body => edit_mode == EditMode::Body,
+        RequestTab::Auth => edit_mode == EditMode::Auth,
+    };
+
+    if editing {
+        frame.render_widget(edit_input, content);
+    } else {
+        frame.render_widget(paragraph(draft, tab), content);
+    }
 }
 
 fn paragraph(draft: Option<&Draft>, tab: RequestTab) -> Paragraph<'_> {

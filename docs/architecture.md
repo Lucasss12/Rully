@@ -153,6 +153,11 @@ checks the version, so no code path can forget the check.
 `store` owns paths and bytes, `http_file` owns meaning. `store` never parses a
 file, `http_file` never looks one up.
 
+The TUI is a first-use entry point: if no workspace is found when it launches,
+it initializes one silently at the current directory. A workspace that exists
+but is invalid or only partly created is an error rather than something the
+TUI repairs.
+
 ### Managing collections and requests from the TUI
 
 At the root of the left panel, `n`, `r` and `d` create, rename and delete

@@ -178,8 +178,10 @@ rather than by a plan.
 - [x] Auth: bearer, basic, api key — and where it lives in `.http`
 - [x] Edit URL and method
 - [x] Edit headers, body and auth
-- [ ] Save back to `.http`, keeping comments intact
+- [x] Save back to `.http`, keeping comments intact
 - [ ] Mouse selection, clipboard via OSC 52
+- [ ] Create a new collection
+- [ ] Create a new request from zero
 
 ---
 

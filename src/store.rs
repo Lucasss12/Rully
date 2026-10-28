@@ -122,15 +122,37 @@ pub fn save(root: &Path, relative: &str, content: &str) -> Result<PathBuf, AppEr
         return Err(missing_collection(collection));
     }
 
+    write_atomic(&path, content)?;
+
+    Ok(path)
+}
+
+/// Rewrites a request that already exists.
+///
+/// The TUI can only save a request it loaded from disk, so a missing file is an
+/// error rather than a request to create one implicitly.
+pub fn overwrite(root: &Path, relative: &str, content: &str) -> Result<PathBuf, AppError> {
+    let path = request_path(root, relative)?;
+
+    if !path.is_file() {
+        return Err(AppError::RequestNotFound(relative.to_string()));
+    }
+
+    write_atomic(&path, content)?;
+
+    Ok(path)
+}
+
+fn write_atomic(path: &Path, content: &str) -> Result<(), AppError> {
     let temporary = path.with_extension("http.tmp");
     fs::write(&temporary, content).map_err(AppError::FileWrite)?;
 
-    if let Err(error) = fs::rename(&temporary, &path) {
+    if let Err(error) = fs::rename(&temporary, path) {
         let _ = fs::remove_file(&temporary);
         return Err(AppError::FileWrite(error));
     }
 
-    Ok(path)
+    Ok(())
 }
 
 /// Reports a missing collection together with the command that creates it.
@@ -681,6 +703,52 @@ mod tests {
         assert!(matches!(result, Err(AppError::RequestAlreadyExists(_))));
         let kept = fs::read_to_string(collections_dir(&root).join("users/list.http")).unwrap();
         assert_eq!(kept, "GET https://api.example.com");
+    }
+
+    #[test]
+    fn overwrites_an_existing_request() {
+        let root = workspace("overwrite");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+        save(&root, "users/list.http", "GET https://api.example.com").unwrap();
+
+        let path = overwrite(&root, "users/list.http", "POST https://api.example.com").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            "POST https://api.example.com"
+        );
+    }
+
+    #[test]
+    fn refuses_to_overwrite_a_missing_request() {
+        let root = workspace("overwrite-missing");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+
+        let result = overwrite(&root, "users/list.http", "GET https://api.example.com");
+
+        assert!(matches!(result, Err(AppError::RequestNotFound(_))));
+    }
+
+    #[test]
+    fn leaves_no_temporary_file_after_an_overwrite() {
+        let root = workspace("overwrite-temp");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+        save(&root, "users/list.http", "GET https://api.example.com").unwrap();
+
+        overwrite(&root, "users/list.http", "POST https://api.example.com").unwrap();
+
+        let entries: Vec<_> = fs::read_dir(collections_dir(&root).join("users"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(entries, vec!["list.http"]);
     }
 
     #[test]

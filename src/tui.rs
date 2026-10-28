@@ -12,6 +12,7 @@ use ratatui::{
 };
 use ratatui_textarea::{CursorMove, TextArea};
 
+use reqwest::Method;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use rully_core::errors::AppError;
 use rully_core::store;
@@ -28,6 +29,8 @@ mod left_panel;
 use left_panel::LeftPanel;
 
 mod view;
+
+mod comments_editor;
 
 mod methods_menu;
 
@@ -85,6 +88,8 @@ enum Focus {
 /// draft because the TUI will eventually edit it before saving.
 #[derive(Debug)]
 struct Draft {
+    relative: Option<String>,
+    comments: Vec<String>,
     method_index: usize,
     url: String,
     headers: HeaderMap,
@@ -95,6 +100,8 @@ struct Draft {
 impl Draft {
     fn empty() -> Self {
         Self {
+            relative: None,
+            comments: Vec::new(),
             method_index: 0,
             url: String::new(),
             headers: HeaderMap::new(),
@@ -176,6 +183,57 @@ impl Draft {
         };
         self.refresh_body_kind();
         Ok(())
+    }
+
+    fn set_comments(&mut self, text: &str) -> Result<(), AppError> {
+        if text.is_empty() {
+            self.comments.clear();
+            return Ok(());
+        }
+
+        let lines: Vec<String> = text.split('\n').map(str::to_string).collect();
+
+        for (index, line) in lines.iter().enumerate() {
+            let line = line.trim();
+            if !line.is_empty() && !line.starts_with('#') {
+                return Err(AppError::InvalidHttpFile(format!(
+                    "line {}: comments must start with #",
+                    index + 1
+                )));
+            }
+        }
+
+        self.comments = lines;
+        Ok(())
+    }
+
+    fn comments_text(&self) -> String {
+        self.comments.join("\n")
+    }
+
+    fn to_request(&self) -> Result<Request, AppError> {
+        let method = METHODS[self.method_index];
+        let method = Method::from_bytes(method.as_bytes())
+            .map_err(|_| AppError::InvalidHttpFile(format!("unsupported method: {method}")))?;
+
+        let mut request = Request::new(method, &self.url)?;
+        request.headers = self.headers.clone();
+        request.body = self.body.clone();
+
+        Ok(request)
+    }
+
+    fn source(&self) -> Result<String, AppError> {
+        let mut source = String::new();
+
+        for line in &self.comments {
+            source.push_str(line);
+            source.push('\n');
+        }
+
+        source.push_str(&http_file::to_string(&self.to_request()?)?);
+
+        Ok(source)
     }
 
     fn set_headers_from_text(&mut self, text: &str) -> Result<(), AppError> {
@@ -271,6 +329,7 @@ impl Draft {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum EditMode {
     None,
+    Comments,
     Url,
     Headers,
     Body,
@@ -280,7 +339,7 @@ enum EditMode {
 impl EditMode {
     /// Whether the editor accepts `Enter` as a line break instead of ignoring it.
     fn allows_newline(self) -> bool {
-        matches!(self, Self::Headers | Self::Body)
+        matches!(self, Self::Comments | Self::Headers | Self::Body)
     }
 }
 
@@ -337,13 +396,7 @@ impl App {
             error: None,
             state: ListState::default(),
             location: None,
-            draft: Some(Draft {
-                method_index: 0,
-                url: String::new(),
-                headers: HeaderMap::new(),
-                body: None,
-                body_kind: BodyKind::None,
-            }),
+            draft: Some(Draft::empty()),
             request_tab: RequestTab::Headers,
             focus: Focus::LeftPanel,
             method_menu: Menu::new(),
@@ -471,6 +524,11 @@ impl App {
             };
             methods_menu::render(frame, popup, &labels, self.auth_menu.index);
         }
+
+        if self.edit_mode == EditMode::Comments {
+            let area = frame.area();
+            comments_editor::render(frame, area, &self.edit_input);
+        }
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -505,6 +563,10 @@ impl App {
         }
 
         if editing {
+            if key_event.code == KeyCode::Enter && self.edit_mode == EditMode::Comments {
+                self.edit_input.insert_str("\n# ");
+                return;
+            }
             if key_event.code == KeyCode::Enter && !self.edit_mode.allows_newline() {
                 return;
             }
@@ -535,6 +597,8 @@ impl App {
 
             Action::EditUrl => self.start_edit(EditMode::Url),
             Action::EditCurrent => self.edit_current_tab(),
+            Action::EditComments => self.start_edit(EditMode::Comments),
+            Action::Save => self.save_current_request(),
             Action::SubmitEdit => self.submit_edit(),
             Action::CancelEdit => self.cancel_edit(),
         }
@@ -573,6 +637,7 @@ impl App {
     fn read_draft(root: &Path, relative: &str) -> Result<Draft, AppError> {
         let path = store::request_path(root, relative)?;
         let file = http_file::read(&path.to_string_lossy())?;
+        let comments = file.comments().to_vec();
         let request = Request::try_from(file)?;
         let body_kind = BodyKind::of(&request.headers, request.body.as_deref());
         let method_index = METHODS
@@ -581,6 +646,8 @@ impl App {
             .unwrap_or(0);
 
         Ok(Draft {
+            relative: Some(relative.to_string()),
+            comments,
             method_index,
             url: request.url.to_string(),
             headers: request.headers,
@@ -739,6 +806,8 @@ impl App {
 
         let text = match mode {
             EditMode::None => return,
+            EditMode::Comments if draft.comments.is_empty() => Ok("# ".to_string()),
+            EditMode::Comments => Ok(draft.comments_text()),
             EditMode::Url => Ok(draft.url.clone()),
             EditMode::Body if draft.body_kind == BodyKind::None => return,
             EditMode::Body => {
@@ -776,6 +845,10 @@ impl App {
     fn submit_edit(&mut self) {
         let text = self.edit_input.lines().join("\n");
         let mode = self.edit_mode;
+        let should_save = self
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.relative.is_some());
 
         let Some(draft) = self.draft.as_mut() else {
             self.cancel_edit();
@@ -784,6 +857,7 @@ impl App {
 
         let result = match mode {
             EditMode::None => Ok(()),
+            EditMode::Comments => draft.set_comments(&text),
             EditMode::Url => {
                 draft.set_url(&text);
                 Ok(())
@@ -795,11 +869,39 @@ impl App {
 
         match result {
             Ok(()) => {
+                if should_save && let Err(error) = self.save_draft() {
+                    self.error = Some(error.to_string());
+                    return;
+                }
+
                 self.error = None;
                 self.cancel_edit();
             }
             Err(error) => self.error = Some(error.to_string()),
         }
+    }
+
+    fn save_current_request(&mut self) {
+        match self.save_draft() {
+            Ok(()) => self.error = None,
+            Err(error) => self.error = Some(error.to_string()),
+        }
+    }
+
+    fn save_draft(&self) -> Result<(), AppError> {
+        let draft = self
+            .draft
+            .as_ref()
+            .ok_or_else(|| AppError::RequestNotFound("no request loaded".to_string()))?;
+        let relative = draft
+            .relative
+            .as_deref()
+            .ok_or_else(|| AppError::RequestNotFound("no request loaded".to_string()))?;
+        let content = draft.source()?;
+
+        store::overwrite(&self.root, relative, &content)?;
+
+        Ok(())
     }
 
     fn cancel_edit(&mut self) {

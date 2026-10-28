@@ -9,6 +9,15 @@ pub struct HttpFile {
     url: String,
     body: Option<String>,
     headers: Vec<(String, String)>,
+    comments: Vec<String>,
+}
+
+impl HttpFile {
+    /// Lines before the request line. The format only allows comments and
+    /// blank lines there, so this is what the TUI preserves when saving.
+    pub fn comments(&self) -> &[String] {
+        &self.comments
+    }
 }
 
 pub fn read(path: &str) -> Result<HttpFile, AppError> {
@@ -24,6 +33,7 @@ pub fn parse(source: &str) -> Result<HttpFile, AppError> {
         index += 1;
     }
 
+    let comments = lines[..index].iter().map(|line| line.to_string()).collect();
     let request_line = lines
         .get(index)
         .ok_or_else(|| AppError::InvalidHttpFile("empty request file".to_string()))?;
@@ -43,8 +53,10 @@ pub fn parse(source: &str) -> Result<HttpFile, AppError> {
         }
 
         if line.starts_with('#') {
-            index += 1;
-            continue;
+            return Err(AppError::InvalidHttpFile(format!(
+                "comments are only allowed before the request line (line {})",
+                index + 1
+            )));
         }
 
         let (name, value) = line
@@ -68,6 +80,7 @@ pub fn parse(source: &str) -> Result<HttpFile, AppError> {
         url: url.to_string(),
         headers,
         body,
+        comments,
     })
 }
 
@@ -89,8 +102,9 @@ pub fn is_request_path(path: &str) -> bool {
 /// Serialises a request back to the file format.
 ///
 /// This is the inverse of `parse`, so `parse(&to_string(r)?) == r`. Comments
-/// are not part of a `Request`, so a serialised file never carries any: the
-/// format only ever adds them to a file the user wrote by hand.
+/// are not part of a `Request`, so a serialised file never carries any.
+/// Callers that need to preserve them, such as the TUI, prepend the lines from
+/// `HttpFile::comments`.
 pub fn to_string(request: &Request) -> Result<String, AppError> {
     let mut out = format!("{} {}\n", request.method, request.url);
 
@@ -274,16 +288,40 @@ mod tests {
     }
 
     #[test]
-    fn ignores_comments_between_headers() {
+    fn captures_comments_before_the_request_line() {
         let file = parse(
+            "# a note\n\
+             # another note\n\
+             \n\
+             GET https://api.example.com",
+        )
+        .unwrap();
+
+        let expected = vec![
+            "# a note".to_string(),
+            "# another note".to_string(),
+            String::new(),
+        ];
+        assert_eq!(file.comments(), expected.as_slice());
+    }
+
+    #[test]
+    fn rejects_comments_between_headers() {
+        let result = parse(
             "GET https://api.example.com\n\
              Accept: application/json\n\
              # a note in the middle\n\
              Authorization: Bearer abc123",
-        )
-        .unwrap();
+        );
 
-        assert_eq!(file.headers.len(), 2);
+        assert!(matches!(result, Err(AppError::InvalidHttpFile(_))));
+    }
+
+    #[test]
+    fn keeps_hash_lines_inside_the_body() {
+        let file = parse("GET https://api.example.com\n\n# body text").unwrap();
+
+        assert_eq!(file.body.as_deref(), Some("# body text"));
     }
 
     #[test]

@@ -24,6 +24,8 @@ pub(super) enum Action {
 
     EditUrl,
     EditCurrent,
+    EditComments,
+    Save,
     SubmitEdit,
     CancelEdit,
 }
@@ -166,6 +168,18 @@ const REQUEST_BAR_KEYS: &[Binding] = &[
         action: Action::EditUrl,
     },
     Binding {
+        key: KeyCode::Char('c'),
+        modifiers: KeyModifiers::NONE,
+        help: "c comments",
+        action: Action::EditComments,
+    },
+    Binding {
+        key: KeyCode::Char('s'),
+        modifiers: KeyModifiers::CONTROL,
+        help: "ctrl+s save",
+        action: Action::Save,
+    },
+    Binding {
         key: KeyCode::Tab,
         modifiers: KeyModifiers::NONE,
         help: "tab",
@@ -215,6 +229,18 @@ const REQUEST_KEYS: &[Binding] = &[
         modifiers: KeyModifiers::NONE,
         help: "a auth",
         action: Action::OpenAuthMenu,
+    },
+    Binding {
+        key: KeyCode::Char('c'),
+        modifiers: KeyModifiers::NONE,
+        help: "c comments",
+        action: Action::EditComments,
+    },
+    Binding {
+        key: KeyCode::Char('s'),
+        modifiers: KeyModifiers::CONTROL,
+        help: "ctrl+s save",
+        action: Action::Save,
     },
     Binding {
         key: KeyCode::Tab,

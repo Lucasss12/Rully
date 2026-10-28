@@ -1124,6 +1124,262 @@ fn does_not_edit_auth_when_none_is_selected() {
 }
 
 #[test]
+fn saves_back_to_the_loaded_file_and_keeps_comments() {
+    let comments = "# users collection\n# used by the list screen\n";
+    let content =
+        format!("{comments}GET https://api.example.com/users\nAccept: application/json\n");
+    let fixture = Fixture::with(
+        "save-back-comments",
+        &["users"],
+        &[("users/list.http", content.as_str())],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('e'));
+    type_text(&mut app, "/search");
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::None);
+    assert!(app.error.is_none());
+
+    let path = store::collections_dir(&fixture.root()).join("users/list.http");
+    let saved = fs::read_to_string(path).unwrap();
+    assert!(saved.starts_with(comments), "{saved}");
+    assert!(
+        saved.contains("GET https://api.example.com/users/search"),
+        "{saved}"
+    );
+    assert!(saved.contains("accept: application/json"), "{saved}");
+}
+
+#[test]
+fn opens_the_comments_editor_from_every_request_tab() {
+    let content = "# users\n# list\nGET https://api.example.com/users\n";
+    let fixture = Fixture::with(
+        "comments-every-tab",
+        &["users"],
+        &[("users/list.http", content)],
+    );
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+
+    press(&mut app, KeyCode::Char('c'));
+    assert_eq!(app.edit_mode, EditMode::Comments);
+    assert_eq!(app.edit_input.lines().join("\n"), "# users\n# list");
+    press(&mut app, KeyCode::Esc);
+
+    press(&mut app, KeyCode::Tab);
+
+    for tab in 0..3 {
+        press(&mut app, KeyCode::Char('c'));
+
+        assert_eq!(app.edit_mode, EditMode::Comments);
+        assert_eq!(app.edit_input.lines().join("\n"), "# users\n# list");
+
+        draw(&mut app, &mut terminal);
+        assert!(screen(&terminal).contains("Comments"));
+
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.edit_mode, EditMode::None);
+
+        if tab < 2 {
+            press(&mut app, KeyCode::Right);
+        }
+    }
+}
+
+#[test]
+fn edits_comments_in_a_hidden_editor_and_saves() {
+    let content = "# old\nGET https://api.example.com/users\n";
+    let fixture = Fixture::with("edit-comments", &["users"], &[("users/list.http", content)]);
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('c'));
+
+    app.edit_input = TextArea::new(vec!["# updated".to_string(), "# second".to_string()]);
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::None);
+    assert!(app.error.is_none());
+    assert_eq!(
+        app.draft.as_ref().unwrap().comments.join("\n"),
+        "# updated\n# second"
+    );
+
+    let path = store::collections_dir(&fixture.root()).join("users/list.http");
+    let saved = fs::read_to_string(path).unwrap();
+    assert!(
+        saved.starts_with("# updated\n# second\nGET https://api.example.com/users"),
+        "{saved}"
+    );
+}
+
+#[test]
+fn starts_an_empty_comments_editor_with_a_hash() {
+    let fixture = Fixture::new("empty-comments");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('c'));
+
+    assert_eq!(app.edit_mode, EditMode::Comments);
+    assert_eq!(app.edit_input.lines().join("\n"), "# ");
+}
+
+#[test]
+fn adds_a_hash_when_starting_a_new_comment_line() {
+    let content = "# old\nGET https://api.example.com/users\n";
+    let fixture = Fixture::with(
+        "new-comment-line",
+        &["users"],
+        &[("users/list.http", content)],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('c'));
+    press(&mut app, KeyCode::Enter);
+    type_text(&mut app, "new");
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::None);
+    assert!(app.error.is_none());
+    assert_eq!(
+        app.draft.as_ref().unwrap().comments.join("\n"),
+        "# old\n# new"
+    );
+}
+
+#[test]
+fn rejects_a_comment_line_without_a_hash() {
+    let content = "# old\nGET https://api.example.com/users\n";
+    let fixture = Fixture::with(
+        "reject-comments",
+        &["users"],
+        &[("users/list.http", content)],
+    );
+    let mut app = App::new(fixture.root());
+    let path = store::collections_dir(&fixture.root()).join("users/list.http");
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('c'));
+
+    app.edit_input = TextArea::new(vec!["not a comment".to_string()]);
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::Comments);
+    assert!(
+        app.error
+            .as_deref()
+            .is_some_and(|error| error.contains("comments must start with #")),
+        "{:?}",
+        app.error
+    );
+    assert_eq!(fs::read_to_string(path).unwrap(), content);
+}
+
+#[test]
+fn saves_with_ctrl_s_outside_editing() {
+    let content = "# users\nGET https://api.example.com/users\n";
+    let fixture = Fixture::with(
+        "save-outside-edit",
+        &["users"],
+        &[("users/list.http", content)],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('m'));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::None);
+    assert!(app.error.is_none());
+
+    let path = store::collections_dir(&fixture.root()).join("users/list.http");
+    let saved = fs::read_to_string(path).unwrap();
+    assert!(
+        saved.starts_with("# users\nPOST https://api.example.com/users"),
+        "{saved}"
+    );
+}
+
+#[test]
+fn saves_the_loaded_request_after_the_selection_moves() {
+    let list = "# list\nGET https://api.example.com/users\n";
+    let create = "# create\nPOST https://api.example.com/users\n";
+    let fixture = Fixture::with(
+        "save-loaded-request",
+        &["users"],
+        &[("users/list.http", list), ("users/create.http", create)],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('m'));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Esc);
+    press(&mut app, KeyCode::Up);
+    press(&mut app, KeyCode::Tab);
+    save(&mut app);
+
+    assert!(app.error.is_none());
+
+    let collections = store::collections_dir(&fixture.root());
+    let saved_list = fs::read_to_string(collections.join("users/list.http")).unwrap();
+    let saved_create = fs::read_to_string(collections.join("users/create.http")).unwrap();
+    assert!(
+        saved_list.starts_with("# list\nPOST https://api.example.com/users"),
+        "{saved_list}"
+    );
+    assert_eq!(saved_create, create);
+}
+
+#[test]
+fn does_not_save_without_a_loaded_request() {
+    let fixture = Fixture::empty("save-without-request");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Tab);
+    save(&mut app);
+
+    assert!(
+        app.error
+            .as_deref()
+            .is_some_and(|error| error.contains("no request loaded")),
+        "{:?}",
+        app.error
+    );
+}
+
+#[test]
 fn q_exits() {
     let fixture = Fixture::empty("quit");
     let mut app = App::new(fixture.root());

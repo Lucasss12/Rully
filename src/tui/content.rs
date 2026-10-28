@@ -38,8 +38,14 @@ pub(super) fn parse_headers(text: &str) -> Result<HeaderMap, AppError> {
 
     for (index, line) in text.lines().enumerate() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
+        if line.is_empty() {
             continue;
+        }
+        if line.starts_with('#') {
+            return Err(AppError::InvalidHeader(format!(
+                "line {}: comments are only allowed before the request line",
+                index + 1
+            )));
         }
 
         let Some((name, value)) = line.split_once(':') else {
@@ -335,10 +341,17 @@ mod tests {
     }
 
     #[test]
-    fn ignores_blank_lines_and_comments_when_parsing_headers() {
-        let headers = parse_headers("# a comment\n\nAccept: text/plain\n").unwrap();
+    fn ignores_blank_lines_when_parsing_headers() {
+        let headers = parse_headers("\nAccept: text/plain\n\n").unwrap();
 
         assert_eq!(headers.len(), 1);
+    }
+
+    #[test]
+    fn rejects_comments_when_parsing_headers() {
+        let error = parse_headers("# a comment\nAccept: text/plain\n").unwrap_err();
+
+        assert!(matches!(error, AppError::InvalidHeader(_)));
     }
 
     #[test]

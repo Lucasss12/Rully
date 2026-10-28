@@ -156,7 +156,8 @@ file, `http_file` never looks one up.
 ## The .http format
 
 ```http
-# Comments start with a hash.
+# Comments belong before the request line.
+# They can span several lines.
 GET https://api.example.com/users
 Accept: application/json
 
@@ -165,30 +166,39 @@ Accept: application/json
 }
 ```
 
-The rules: the first non-empty, non-comment line is `METHOD URL`; the lines
-after it are headers until the first empty line; everything after that empty
-line is the body, verbatim. A name ending in `.http` is a request, anything
-else is a collection.
+The rules: comment lines start with `#` and are only allowed before the request
+line. The first non-empty, non-comment line is `METHOD URL`; the lines after it
+are headers until the first empty line; everything after that empty line is
+the body, verbatim. A `#` in the header block is an error, not a comment. A name
+ending in `.http` is a request, anything else is a collection.
 
 There is no separate query section — queries live in the URL, which is where
 `Request` already expects them.
 
 ## Read and write are not symmetric
 
-`parse` builds a `HttpFile` of plain strings, then `TryFrom` validates it into
-a `Request`. The intermediate step is what lets phase 8 interpolate `{{var}}`,
-which cannot be parsed as a URL.
+`parse` builds a `HttpFile` of plain strings, including the leading comment
+lines, then `TryFrom` validates the request part into a `Request`. The
+intermediate step is what lets phase 8 interpolate `{{var}}`, which cannot be
+parsed as a URL.
 
 `to_string` goes the other way, from `Request` back to text. Because a
-`Request` has no comments, serialising one produces a file with none. That is
-never a loss, because:
+`Request` has no comments, serialising one produces a file with none. Callers
+that need to preserve comments prepend them explicitly.
+
+The TUI is the one place that rewrites a file the user wrote. It keeps the
+loaded comments in the `Draft`, serialises the request, then calls
+`store::overwrite`; because comments are only valid before the request line,
+there are no comments inside the request to lose. Writes are atomic: a
+temporary file is renamed over the target.
+
+The CLI still has no `update` command:
 
 - `--save` always creates a new file, so there were no comments to lose
 - `edit` hands the path to the user's editor and re-reads the result, so rully
   never rewrites a file the user wrote
 
-That is why there is no `update` command. The file is the source, not a
-by-product of the tool.
+The file is the source, not a by-product of the tool.
 
 The round trip is the gate for everything that writes to disk:
 
@@ -198,5 +208,6 @@ assert Request == Request'
 ```
 
 Headers are compared as a sorted set, because `HeaderMap` does not iterate in
-insertion order. Serialising therefore may reorder headers, which is cosmetic
-but would otherwise show up as a spurious diff on every `--save`.
+insertion order. Serialising therefore may reorder headers and lower-case their
+names, which is cosmetic but would otherwise show up as a spurious diff on every
+save.

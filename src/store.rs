@@ -103,6 +103,47 @@ pub fn create_collection(root: &Path, collection: &str) -> Result<(), AppError> 
     fs::create_dir_all(&path).map_err(AppError::FileWrite)
 }
 
+pub fn rename_collection(root: &Path, from: &str, to: &str) -> Result<PathBuf, AppError> {
+    let source = resolve(root, from)?;
+    let target = resolve(root, to)?;
+
+    if !source.is_dir() {
+        return Err(AppError::CollectionNotFound(from.to_string()));
+    }
+
+    if from == to {
+        return Ok(source);
+    }
+
+    if target.exists() {
+        return Err(AppError::CollectionAlreadyExists(to.to_string()));
+    }
+
+    fs::rename(&source, &target).map_err(AppError::FileWrite)?;
+
+    Ok(target)
+}
+
+pub fn delete_collection(root: &Path, collection: &str) -> Result<(), AppError> {
+    let path = resolve(root, collection)?;
+
+    if !path.is_dir() {
+        return Err(AppError::CollectionNotFound(collection.to_string()));
+    }
+
+    let mut entries = fs::read_dir(&path).map_err(AppError::FileRead)?;
+
+    match entries.next() {
+        None => {}
+        Some(Ok(_)) => {
+            return Err(AppError::CollectionNotEmpty(collection.to_string()));
+        }
+        Some(Err(error)) => return Err(AppError::FileRead(error)),
+    }
+
+    fs::remove_dir(&path).map_err(AppError::FileWrite)
+}
+
 /// Writes a request, refusing to touch an existing file.
 ///
 /// The write goes to a temporary file that is then renamed over the target, so
@@ -173,6 +214,35 @@ pub fn delete(root: &Path, relative: &str) -> Result<(), AppError> {
     }
 
     fs::remove_file(&path).map_err(AppError::FileWrite)
+}
+
+pub fn rename_request(root: &Path, from: &str, to: &str) -> Result<PathBuf, AppError> {
+    let source = request_path(root, from)?;
+    let target = request_path(root, to)?;
+
+    if !source.is_file() {
+        return Err(AppError::RequestNotFound(from.to_string()));
+    }
+
+    if source == target {
+        return Ok(source);
+    }
+
+    let collection = target
+        .parent()
+        .ok_or_else(|| AppError::RequestNotFound(to.to_string()))?;
+
+    if !collection.is_dir() {
+        return Err(missing_collection(collection));
+    }
+
+    if target.exists() {
+        return Err(AppError::RequestAlreadyExists(to.to_string()));
+    }
+
+    fs::rename(&source, &target).map_err(AppError::FileWrite)?;
+
+    Ok(target)
 }
 
 /// Creates a request from the template. The collection must already exist, so
@@ -590,6 +660,91 @@ mod tests {
     }
 
     #[test]
+    fn renames_a_collection_with_its_contents() {
+        let root = workspace("rename-collection");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+        save(&root, "users/list.http", "GET https://api.example.com").unwrap();
+
+        let path = rename_collection(&root, "users", "accounts").unwrap();
+
+        assert!(path.is_dir());
+        assert!(!collections_dir(&root).join("users").exists());
+        assert!(collections_dir(&root).join("accounts/list.http").is_file());
+    }
+
+    #[test]
+    fn renaming_a_collection_to_its_own_name_is_a_no_op() {
+        let root = workspace("rename-collection-same");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+
+        let path = rename_collection(&root, "users", "users").unwrap();
+
+        assert!(path.is_dir());
+    }
+
+    #[test]
+    fn refuses_to_rename_a_missing_collection() {
+        let root = workspace("rename-collection-missing");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+
+        let result = rename_collection(&root, "users", "accounts");
+
+        assert!(matches!(result, Err(AppError::CollectionNotFound(_))));
+    }
+
+    #[test]
+    fn refuses_to_rename_onto_an_existing_collection() {
+        let root = workspace("rename-collection-existing");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+        create_collection(&root, "accounts").unwrap();
+
+        let result = rename_collection(&root, "users", "accounts");
+
+        assert!(matches!(result, Err(AppError::CollectionAlreadyExists(_))));
+    }
+
+    #[test]
+    fn deletes_an_empty_collection() {
+        let root = workspace("delete-collection-empty");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+
+        delete_collection(&root, "users").unwrap();
+
+        assert!(!collections_dir(&root).join("users").exists());
+    }
+
+    #[test]
+    fn refuses_to_delete_a_non_empty_collection() {
+        let root = workspace_with_content("delete-collection-non-empty");
+        let _project = Project::new(&root);
+
+        let result = delete_collection(&root, "users");
+
+        assert!(matches!(result, Err(AppError::CollectionNotEmpty(_))));
+        assert!(collections_dir(&root).join("users").is_dir());
+    }
+
+    #[test]
+    fn refuses_to_delete_a_missing_collection() {
+        let root = workspace("delete-collection-missing");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+
+        let result = delete_collection(&root, "users");
+
+        assert!(matches!(result, Err(AppError::CollectionNotFound(_))));
+    }
+
+    #[test]
     fn lists_a_nested_collection() {
         let root = workspace_with_content("list-nested");
         let _project = Project::new(&root);
@@ -886,6 +1041,79 @@ mod tests {
 
         assert!(matches!(result, Err(AppError::RequestNotFound(_))));
         assert!(collections_dir(&root).join("users").is_dir());
+    }
+
+    // rename_request
+
+    #[test]
+    fn renames_a_request_and_keeps_its_content() {
+        let root = workspace("rename-request");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+        let source = "# Keep me\nGET https://api.example.com/users\n";
+        let old = save(&root, "users/list.http", source).unwrap();
+
+        let new = rename_request(&root, "users/list", "users/index").unwrap();
+
+        assert_eq!(new, request_path(&root, "users/index.http").unwrap());
+        assert!(!old.exists());
+        assert_eq!(fs::read_to_string(new).unwrap(), source);
+    }
+
+    #[test]
+    fn renaming_a_request_to_its_own_name_is_a_no_op() {
+        let root = workspace("rename-request-same");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+        let path = save(&root, "users/list.http", "GET https://api.example.com").unwrap();
+
+        let renamed = rename_request(&root, "users/list.http", "users/list").unwrap();
+
+        assert_eq!(renamed, path);
+        assert!(renamed.is_file());
+    }
+
+    #[test]
+    fn refuses_to_rename_a_missing_request() {
+        let root = workspace("rename-request-missing");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+
+        let result = rename_request(&root, "users/absent.http", "users/index");
+
+        assert!(matches!(result, Err(AppError::RequestNotFound(_))));
+    }
+
+    #[test]
+    fn refuses_to_rename_onto_an_existing_request() {
+        let root = workspace("rename-request-existing");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+        save(&root, "users/list.http", "GET https://api.example.com").unwrap();
+        save(&root, "users/index.http", "GET https://api.example.com").unwrap();
+
+        let result = rename_request(&root, "users/list", "users/index");
+
+        assert!(matches!(result, Err(AppError::RequestAlreadyExists(_))));
+        assert!(collections_dir(&root).join("users/list.http").is_file());
+        assert!(collections_dir(&root).join("users/index.http").is_file());
+    }
+
+    #[test]
+    fn refuses_to_rename_a_request_into_a_missing_collection() {
+        let root = workspace("rename-request-missing-collection");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_collection(&root, "users").unwrap();
+        save(&root, "users/list.http", "GET https://api.example.com").unwrap();
+
+        let result = rename_request(&root, "users/list", "absent/index");
+
+        assert!(matches!(result, Err(AppError::MissingCollection(_))));
     }
 
     // new_request

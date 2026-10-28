@@ -153,6 +153,25 @@ checks the version, so no code path can forget the check.
 `store` owns paths and bytes, `http_file` owns meaning. `store` never parses a
 file, `http_file` never looks one up.
 
+### Managing collections and requests from the TUI
+
+At the root of the left panel, `n`, `r` and `d` create, rename and delete
+collections. Creation and renaming go through the same `store` primitives as
+the CLI, so names are validated in one place. Deletion is only allowed for an
+empty collection and always goes through a confirmation prompt.
+
+Inside a collection, the same keys manage requests. `n` creates a request from
+the template and loads it immediately; `r` renames the file with
+`store::rename_request`; `d` deletes it after confirmation. Prompts show names
+without the `.http` extension, but keep it if the user types it. If the deleted
+request is the one currently loaded, the draft is cleared rather than left
+pointing at a missing file.
+
+The TUI deliberately exposes only top-level collections: it rejects names
+containing `/` and hides nested directories when a collection is open, while
+`store` still understands nested paths for the CLI. After a rename, the loaded
+draft's relative path is rebased so the next save targets the new location.
+
 ## The .http format
 
 ```http

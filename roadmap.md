@@ -180,8 +180,12 @@ rather than by a plan.
 - [x] Edit headers, body and auth
 - [x] Save back to `.http`, keeping comments intact
 - [ ] Mouse selection, clipboard via OSC 52
-- [ ] Create a new collection
-- [ ] Create a new request from zero
+- [x] Create a new collection (top level for now)
+- [x] Rename a collection
+- [x] Delete an empty collection
+- [x] Create a new request from zero
+- [x] Rename a request
+- [x] Delete a request
 
 ---
 

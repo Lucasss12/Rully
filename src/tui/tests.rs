@@ -190,6 +190,336 @@ fn opens_collection_and_goes_back() {
 }
 
 #[test]
+fn creates_a_collection_from_a_prompt() {
+    let fixture = Fixture::empty("new-collection-prompt");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+    press(&mut app, KeyCode::Char('n'));
+    draw(&mut app, &mut terminal);
+
+    assert!(matches!(
+        app.prompt.as_ref().map(|prompt| &prompt.kind),
+        Some(PromptKind::NewCollection)
+    ));
+    assert!(screen(&terminal).contains("New collection"));
+
+    type_text(&mut app, "users");
+    press(&mut app, KeyCode::Enter);
+
+    assert!(app.prompt.is_none());
+    assert_eq!(app.items, vec!["users/"]);
+    assert_eq!(app.state.selected(), Some(0));
+    assert!(
+        store::collections_dir(&fixture.root())
+            .join("users")
+            .is_dir()
+    );
+}
+
+#[test]
+fn cancels_the_new_collection_prompt() {
+    let fixture = Fixture::empty("cancel-new-collection");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Char('n'));
+    press(&mut app, KeyCode::Esc);
+
+    assert!(app.prompt.is_none());
+    assert!(app.items.is_empty());
+}
+
+#[test]
+fn rejects_a_sub_collection_name() {
+    let fixture = Fixture::empty("nested-collection-prompt");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Char('n'));
+    type_text(&mut app, "users/admin");
+    press(&mut app, KeyCode::Enter);
+
+    let prompt = app.prompt.as_ref().expect("the prompt should stay open");
+    assert!(
+        prompt
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("sub-collections are not supported")),
+        "{:?}",
+        prompt.error
+    );
+    assert!(
+        !store::collections_dir(&fixture.root())
+            .join("users")
+            .exists()
+    );
+}
+
+#[test]
+fn renames_the_selected_collection_and_rebases_the_draft() {
+    let fixture = Fixture::new("rename-collection-prompt");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Esc);
+    press(&mut app, KeyCode::Char('r'));
+
+    let prompt = app.prompt.as_ref().expect("the prompt should open");
+    assert!(matches!(
+        &prompt.kind,
+        PromptKind::RenameCollection { old } if old == "users"
+    ));
+    assert_eq!(prompt.input.lines().join(""), "users");
+
+    app.prompt.as_mut().unwrap().input = TextArea::new(vec!["accounts".to_string()]);
+    press(&mut app, KeyCode::Enter);
+
+    assert!(app.prompt.is_none());
+    assert_eq!(app.items, vec!["accounts/"]);
+    assert_eq!(app.state.selected(), Some(0));
+    assert_eq!(
+        app.draft
+            .as_ref()
+            .and_then(|draft| draft.relative.as_deref()),
+        Some("accounts/list.http")
+    );
+
+    let collections = store::collections_dir(&fixture.root());
+    assert!(!collections.join("users").exists());
+    assert!(collections.join("accounts/list.http").is_file());
+}
+
+#[test]
+fn asks_before_deleting_a_collection() {
+    let fixture = Fixture::with("delete-collection-prompt", &["users"], &[]);
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    press(&mut app, KeyCode::Char('d'));
+    draw(&mut app, &mut terminal);
+
+    assert!(matches!(
+        app.prompt.as_ref().map(|prompt| &prompt.kind),
+        Some(PromptKind::DeleteCollection { name }) if name == "users"
+    ));
+    assert!(screen(&terminal).contains("Delete collection \"users\"?"));
+
+    press(&mut app, KeyCode::Esc);
+
+    assert!(app.prompt.is_none());
+    assert!(
+        store::collections_dir(&fixture.root())
+            .join("users")
+            .is_dir()
+    );
+}
+
+#[test]
+fn deletes_an_empty_collection_after_confirmation() {
+    let fixture = Fixture::with("delete-empty-collection", &["users"], &[]);
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Enter);
+
+    assert!(app.prompt.is_none());
+    assert!(app.items.is_empty());
+    assert_eq!(app.state.selected(), None);
+    assert!(
+        !store::collections_dir(&fixture.root())
+            .join("users")
+            .exists()
+    );
+}
+
+#[test]
+fn refuses_to_delete_a_non_empty_collection() {
+    let fixture = Fixture::new("delete-non-empty-collection");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Enter);
+
+    let prompt = app.prompt.as_ref().expect("the prompt should stay open");
+    assert!(
+        prompt
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("Collection is not empty")),
+        "{:?}",
+        prompt.error
+    );
+    assert!(
+        store::collections_dir(&fixture.root())
+            .join("users")
+            .is_dir()
+    );
+}
+
+#[test]
+fn creates_a_request_from_a_prompt_and_loads_it() {
+    let fixture = Fixture::with("new-request-prompt", &["users"], &[]);
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('n'));
+    draw(&mut app, &mut terminal);
+
+    assert!(matches!(
+        app.prompt.as_ref().map(|prompt| &prompt.kind),
+        Some(PromptKind::NewRequest { collection }) if collection == "users"
+    ));
+    assert!(screen(&terminal).contains("New request"));
+
+    type_text(&mut app, "create.http");
+    press(&mut app, KeyCode::Enter);
+
+    assert!(app.prompt.is_none());
+    assert_eq!(app.items, vec!["create.http"]);
+    assert_eq!(app.state.selected(), Some(0));
+    assert_eq!(
+        app.draft
+            .as_ref()
+            .and_then(|draft| draft.relative.as_deref()),
+        Some("users/create.http")
+    );
+
+    let path = store::collections_dir(&fixture.root()).join("users/create.http");
+    assert!(path.is_file());
+    let content = fs::read_to_string(path).unwrap();
+    assert!(content.contains("GET https://api.example.com"));
+}
+
+#[test]
+fn rejects_an_empty_request_name() {
+    let fixture = Fixture::with("empty-request-prompt", &["users"], &[]);
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('n'));
+    press(&mut app, KeyCode::Enter);
+
+    let prompt = app.prompt.as_ref().expect("the prompt should stay open");
+    assert!(
+        prompt
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("request name cannot be empty")),
+        "{:?}",
+        prompt.error
+    );
+    assert!(
+        !store::collections_dir(&fixture.root())
+            .join("users/create.http")
+            .exists()
+    );
+}
+
+#[test]
+fn renames_the_selected_request_and_rebases_the_draft() {
+    let fixture = Fixture::new("rename-request-prompt");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('r'));
+
+    let prompt = app.prompt.as_ref().expect("the prompt should open");
+    assert!(matches!(
+        &prompt.kind,
+        PromptKind::RenameRequest { collection, old }
+            if collection == "users" && old == "list.http"
+    ));
+    assert_eq!(prompt.input.lines().join(""), "list");
+
+    app.prompt.as_mut().unwrap().input = TextArea::new(vec!["index".to_string()]);
+    press(&mut app, KeyCode::Enter);
+
+    assert!(app.prompt.is_none());
+    assert_eq!(app.items, vec!["index.http"]);
+    assert_eq!(app.state.selected(), Some(0));
+    assert_eq!(
+        app.draft
+            .as_ref()
+            .and_then(|draft| draft.relative.as_deref()),
+        Some("users/index.http")
+    );
+
+    let collection = store::collections_dir(&fixture.root()).join("users");
+    assert!(!collection.join("list.http").exists());
+    assert!(collection.join("index.http").is_file());
+}
+
+#[test]
+fn asks_before_deleting_a_request() {
+    let fixture = Fixture::new("delete-request-prompt");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('d'));
+    draw(&mut app, &mut terminal);
+
+    assert!(matches!(
+        app.prompt.as_ref().map(|prompt| &prompt.kind),
+        Some(PromptKind::DeleteRequest { collection, name })
+            if collection == "users" && name == "list.http"
+    ));
+    assert!(screen(&terminal).contains("Delete request \"list\"?"));
+
+    press(&mut app, KeyCode::Esc);
+
+    assert!(app.prompt.is_none());
+    assert!(
+        store::collections_dir(&fixture.root())
+            .join("users/list.http")
+            .is_file()
+    );
+}
+
+#[test]
+fn deletes_the_loaded_request_and_clears_the_draft() {
+    let fixture = Fixture::new("delete-loaded-request");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('d'));
+    press(&mut app, KeyCode::Enter);
+
+    assert!(app.prompt.is_none());
+    assert!(app.items.is_empty());
+    assert_eq!(app.state.selected(), None);
+    assert_eq!(
+        app.draft
+            .as_ref()
+            .and_then(|draft| draft.relative.as_deref()),
+        None
+    );
+    assert!(
+        !store::collections_dir(&fixture.root())
+            .join("users/list.http")
+            .exists()
+    );
+}
+
+#[test]
+fn hides_nested_collections_in_the_tui() {
+    let fixture = Fixture::new("hide-nested-collection");
+    fs::create_dir_all(store::collections_dir(&fixture.root()).join("users/admin")).unwrap();
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    press(&mut app, KeyCode::Enter);
+    draw(&mut app, &mut terminal);
+
+    assert_eq!(app.items, vec!["list.http"]);
+    assert!(!screen(&terminal).contains("admin/"));
+}
+
+#[test]
 fn loads_request_into_the_bar() {
     let fixture = Fixture::new("load-request");
     let mut app = App::new(fixture.root());

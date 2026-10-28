@@ -17,6 +17,7 @@ pub enum AppError {
     CollectionNotFound(String),
     MissingCollection(String),
     CollectionAlreadyExists(String),
+    CollectionNotEmpty(String),
     WorkspaceAlreadyExists,
     RequestNotFound(String),
     RequestAlreadyExists(String),
@@ -55,6 +56,7 @@ impl AppError {
             AppError::CollectionNotFound(_) => ErrorCategory::Cli,
             AppError::MissingCollection(_) => ErrorCategory::Cli,
             AppError::CollectionAlreadyExists(_) => ErrorCategory::Cli,
+            AppError::CollectionNotEmpty(_) => ErrorCategory::Cli,
             AppError::WorkspaceAlreadyExists => ErrorCategory::Cli,
             AppError::RequestNotFound(_) => ErrorCategory::Cli,
             AppError::RequestAlreadyExists(_) => ErrorCategory::Cli,
@@ -127,6 +129,9 @@ impl std::fmt::Display for AppError {
             }
             AppError::CollectionAlreadyExists(name) => {
                 write!(formatter, "Collection already exists: {name}")
+            }
+            AppError::CollectionNotEmpty(name) => {
+                write!(formatter, "Collection is not empty: {name}")
             }
             AppError::WorkspaceAlreadyExists => {
                 write!(formatter, "A rully workspace already exists here")
@@ -206,6 +211,10 @@ mod tests {
             ),
             (
                 AppError::CollectionAlreadyExists(String::new()),
+                ErrorCategory::Cli,
+            ),
+            (
+                AppError::CollectionNotEmpty(String::new()),
                 ErrorCategory::Cli,
             ),
             (AppError::WorkspaceAlreadyExists, ErrorCategory::Cli),
@@ -354,6 +363,13 @@ mod tests {
         let error = AppError::CollectionAlreadyExists("users".to_string());
 
         assert_eq!(error.to_string(), "Collection already exists: users");
+    }
+
+    #[test]
+    fn formats_a_non_empty_collection() {
+        let error = AppError::CollectionNotEmpty("users".to_string());
+
+        assert_eq!(error.to_string(), "Collection is not empty: users");
     }
 
     #[test]

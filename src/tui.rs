@@ -30,6 +30,8 @@ use left_panel::LeftPanel;
 
 mod view;
 
+mod collection_prompt;
+
 mod comments_editor;
 
 mod methods_menu;
@@ -59,6 +61,7 @@ struct App {
 
     edit_mode: EditMode,
     edit_input: TextArea<'static>,
+    prompt: Option<Prompt>,
 
     // Focus and the menus that float over the interface.
     focus: Focus,
@@ -377,6 +380,167 @@ impl Menu {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum PromptKind {
+    NewCollection,
+    RenameCollection { old: String },
+    DeleteCollection { name: String },
+    NewRequest { collection: String },
+    RenameRequest { collection: String, old: String },
+    DeleteRequest { collection: String, name: String },
+}
+
+#[derive(Debug)]
+struct Prompt {
+    kind: PromptKind,
+    input: TextArea<'static>,
+    error: Option<String>,
+}
+
+impl Prompt {
+    fn new_collection() -> Self {
+        Self {
+            kind: PromptKind::NewCollection,
+            input: TextArea::default(),
+            error: None,
+        }
+    }
+
+    fn rename_collection(name: &str) -> Self {
+        let mut input = TextArea::new(vec![name.to_string()]);
+        input.move_cursor(CursorMove::End);
+
+        Self {
+            kind: PromptKind::RenameCollection {
+                old: name.to_string(),
+            },
+            input,
+            error: None,
+        }
+    }
+
+    fn delete_collection(name: &str) -> Self {
+        Self {
+            kind: PromptKind::DeleteCollection {
+                name: name.to_string(),
+            },
+            input: TextArea::default(),
+            error: None,
+        }
+    }
+
+    fn new_request(collection: &str) -> Self {
+        Self {
+            kind: PromptKind::NewRequest {
+                collection: collection.to_string(),
+            },
+            input: TextArea::default(),
+            error: None,
+        }
+    }
+
+    fn rename_request(collection: &str, name: &str) -> Self {
+        let mut input = TextArea::new(vec![request_display_name(name).to_string()]);
+        input.move_cursor(CursorMove::End);
+
+        Self {
+            kind: PromptKind::RenameRequest {
+                collection: collection.to_string(),
+                old: name.to_string(),
+            },
+            input,
+            error: None,
+        }
+    }
+
+    fn delete_request(collection: &str, name: &str) -> Self {
+        Self {
+            kind: PromptKind::DeleteRequest {
+                collection: collection.to_string(),
+                name: name.to_string(),
+            },
+            input: TextArea::default(),
+            error: None,
+        }
+    }
+
+    fn accepts_text(&self) -> bool {
+        !matches!(
+            &self.kind,
+            PromptKind::DeleteCollection { .. } | PromptKind::DeleteRequest { .. }
+        )
+    }
+
+    fn title(&self) -> &'static str {
+        match &self.kind {
+            PromptKind::NewCollection => "New collection",
+            PromptKind::RenameCollection { .. } => "Rename collection",
+            PromptKind::DeleteCollection { .. } => "Delete collection",
+            PromptKind::NewRequest { .. } => "New request",
+            PromptKind::RenameRequest { .. } => "Rename request",
+            PromptKind::DeleteRequest { .. } => "Delete request",
+        }
+    }
+
+    fn hint(&self) -> &'static str {
+        if self.accepts_text() {
+            "Enter save · Esc cancel"
+        } else {
+            "Enter delete · Esc cancel"
+        }
+    }
+}
+
+fn prompt_collection_name(input: &TextArea<'_>) -> Result<String, AppError> {
+    let name = input.lines().join("").trim().to_string();
+
+    if name.is_empty() {
+        return Err(AppError::InvalidRequestName(
+            "collection name cannot be empty".to_string(),
+        ));
+    }
+
+    if name.contains('/') {
+        return Err(AppError::InvalidRequestName(
+            "sub-collections are not supported yet".to_string(),
+        ));
+    }
+
+    Ok(name)
+}
+
+fn prompt_request_name(input: &TextArea<'_>) -> Result<String, AppError> {
+    let typed = input.lines().join("").trim().to_string();
+
+    if typed.is_empty() {
+        return Err(AppError::InvalidRequestName(
+            "request name cannot be empty".to_string(),
+        ));
+    }
+
+    if typed.contains('/') {
+        return Err(AppError::InvalidRequestName(
+            "request names cannot contain '/'".to_string(),
+        ));
+    }
+
+    let name = typed.strip_suffix(".http").unwrap_or(&typed);
+
+    if name.is_empty() {
+        return Err(AppError::InvalidRequestName(
+            "request name cannot be empty".to_string(),
+        ));
+    }
+
+    store::validate_name(name)?;
+
+    Ok(format!("{name}.http"))
+}
+
+fn request_display_name(name: &str) -> &str {
+    name.strip_suffix(".http").unwrap_or(name)
+}
+
 const METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 impl App {
@@ -405,6 +569,7 @@ impl App {
             exit: false,
             edit_mode: EditMode::None,
             edit_input: TextArea::default(),
+            prompt: None,
         };
         app.refresh();
         app
@@ -413,15 +578,36 @@ impl App {
     /// Reloads `items` for the current level: the collections at the root, or
     /// the requests of the open collection.
     fn refresh(&mut self) {
+        self.refresh_selecting(None);
+    }
+
+    fn refresh_selecting(&mut self, selected: Option<&str>) {
+        let previous = selected
+            .map(str::to_string)
+            .or_else(|| self.selected_entry().map(str::to_string));
+
         let result = match &self.location {
             None => store::list_collections(&self.root),
-            Some(name) => store::list_requests(&self.root, name),
+            Some(name) => store::list_requests(&self.root, name).map(|entries| {
+                entries
+                    .into_iter()
+                    .filter(|entry| http_file::is_request_path(entry))
+                    .collect()
+            }),
         };
 
         match result {
             Ok(names) => {
-                self.state
-                    .select(if names.is_empty() { None } else { Some(0) });
+                let index = previous
+                    .as_deref()
+                    .and_then(|name| names.iter().position(|entry| entry == name))
+                    .unwrap_or(0);
+
+                self.state.select(if names.is_empty() {
+                    None
+                } else {
+                    Some(index.min(names.len() - 1))
+                });
                 self.items = names;
                 self.error = None;
             }
@@ -529,6 +715,11 @@ impl App {
             let area = frame.area();
             comments_editor::render(frame, area, &self.edit_input);
         }
+
+        if let Some(prompt) = &self.prompt {
+            let area = frame.area();
+            collection_prompt::render(frame, area, prompt);
+        }
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -544,6 +735,11 @@ impl App {
     /// Looks the key up in the table for the current focus (or the method menu
     /// when it is open) and dispatches the matching action.
     fn handle_key_event(&mut self, key_event: KeyEvent) {
+        if self.prompt.is_some() {
+            self.handle_prompt_key(key_event);
+            return;
+        }
+
         let menu_open = self.method_menu.open || self.body_menu.open || self.auth_menu.open;
         let editing = self.edit_mode != EditMode::None;
 
@@ -574,6 +770,262 @@ impl App {
         }
     }
 
+    fn handle_prompt_key(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Esc => {
+                self.prompt = None;
+                return;
+            }
+            KeyCode::Enter => {
+                self.submit_prompt();
+                return;
+            }
+            _ => {}
+        }
+
+        if let Some(prompt) = self.prompt.as_mut()
+            && prompt.accepts_text()
+        {
+            prompt.input.input(key_event);
+        }
+    }
+
+    fn submit_prompt(&mut self) {
+        let Some(mut prompt) = self.prompt.take() else {
+            return;
+        };
+
+        match prompt.kind.clone() {
+            PromptKind::NewCollection => {
+                let name = match prompt_collection_name(&prompt.input) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                        return;
+                    }
+                };
+
+                match store::create_collection(&self.root, &name) {
+                    Ok(()) => {
+                        self.error = None;
+                        self.refresh_selecting(Some(&format!("{name}/")));
+                    }
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                    }
+                }
+            }
+            PromptKind::RenameCollection { old } => {
+                let name = match prompt_collection_name(&prompt.input) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                        return;
+                    }
+                };
+
+                match store::rename_collection(&self.root, &old, &name) {
+                    Ok(_) => {
+                        self.error = None;
+                        self.rebase_draft(&old, &name);
+                        self.refresh_selecting(Some(&format!("{name}/")));
+                    }
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                    }
+                }
+            }
+            PromptKind::DeleteCollection { name } => {
+                let neighbor = self.delete_neighbor();
+
+                match store::delete_collection(&self.root, &name) {
+                    Ok(()) => {
+                        self.error = None;
+                        self.refresh_selecting(neighbor.as_deref());
+                    }
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                    }
+                }
+            }
+            PromptKind::NewRequest { collection } => {
+                let name = match prompt_request_name(&prompt.input) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                        return;
+                    }
+                };
+
+                match store::new_request(&self.root, &format!("{collection}/{name}")) {
+                    Ok(_) => {
+                        self.error = None;
+                        self.refresh_selecting(Some(&name));
+                        self.load_selected_request();
+                    }
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                    }
+                }
+            }
+            PromptKind::RenameRequest { collection, old } => {
+                let name = match prompt_request_name(&prompt.input) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                        return;
+                    }
+                };
+
+                let old_relative = format!("{collection}/{old}");
+                let new_relative = format!("{collection}/{name}");
+
+                match store::rename_request(&self.root, &old_relative, &new_relative) {
+                    Ok(_) => {
+                        self.error = None;
+                        self.rebase_draft(&old_relative, &new_relative);
+                        self.refresh_selecting(Some(&name));
+                    }
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                    }
+                }
+            }
+            PromptKind::DeleteRequest { collection, name } => {
+                let relative = format!("{collection}/{name}");
+                let neighbor = self.delete_neighbor();
+                let deleting_loaded = self
+                    .draft
+                    .as_ref()
+                    .and_then(|draft| draft.relative.as_deref())
+                    == Some(relative.as_str());
+
+                match store::delete(&self.root, &relative) {
+                    Ok(()) => {
+                        self.error = None;
+
+                        if deleting_loaded {
+                            self.cancel_edit();
+                            self.draft = Some(Draft::empty());
+                        }
+
+                        self.refresh_selecting(neighbor.as_deref());
+                    }
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                    }
+                }
+            }
+        }
+    }
+
+    fn open_new_collection_prompt(&mut self) {
+        if self.location.is_none() {
+            self.prompt = Some(Prompt::new_collection());
+        }
+    }
+
+    fn open_rename_collection_prompt(&mut self) {
+        if let Some(name) = self.selected_collection() {
+            self.prompt = Some(Prompt::rename_collection(name));
+        }
+    }
+
+    fn open_delete_collection_prompt(&mut self) {
+        if let Some(name) = self.selected_collection() {
+            self.prompt = Some(Prompt::delete_collection(name));
+        }
+    }
+
+    fn open_new_request_prompt(&mut self) {
+        if let Some(collection) = self.location.clone() {
+            self.prompt = Some(Prompt::new_request(&collection));
+        }
+    }
+
+    fn open_rename_request_prompt(&mut self) {
+        let Some(collection) = self.location.clone() else {
+            return;
+        };
+        let Some(entry) = self.selected_entry().map(str::to_string) else {
+            return;
+        };
+
+        if http_file::is_request_path(&entry) {
+            self.prompt = Some(Prompt::rename_request(&collection, &entry));
+        }
+    }
+
+    fn open_delete_request_prompt(&mut self) {
+        let Some(collection) = self.location.clone() else {
+            return;
+        };
+        let Some(entry) = self.selected_entry().map(str::to_string) else {
+            return;
+        };
+
+        if http_file::is_request_path(&entry) {
+            self.prompt = Some(Prompt::delete_request(&collection, &entry));
+        }
+    }
+
+    fn selected_collection(&self) -> Option<&str> {
+        if self.location.is_some() {
+            return None;
+        }
+
+        self.selected_entry()
+            .and_then(|entry| entry.strip_suffix('/'))
+    }
+
+    fn delete_neighbor(&self) -> Option<String> {
+        let index = self.state.selected()?;
+        let neighbor = self.items.get(index + 1).or_else(|| {
+            index
+                .checked_sub(1)
+                .and_then(|previous| self.items.get(previous))
+        })?;
+
+        neighbor.strip_suffix('/').map(str::to_string)
+    }
+
+    fn rebase_draft(&mut self, old: &str, new: &str) {
+        if self.location.as_deref() == Some(old) {
+            self.location = Some(new.to_string());
+        }
+
+        let Some(draft) = self.draft.as_mut() else {
+            return;
+        };
+        let Some(relative) = draft.relative.clone() else {
+            return;
+        };
+
+        if relative == old {
+            draft.relative = Some(new.to_string());
+            return;
+        }
+
+        let Some(rest) = relative
+            .strip_prefix(old)
+            .and_then(|rest| rest.strip_prefix('/'))
+        else {
+            return;
+        };
+
+        draft.relative = Some(format!("{new}/{rest}"));
+    }
+
     fn dispatch(&mut self, action: Action) {
         match action {
             Action::Quit => self.quit(),
@@ -581,6 +1033,12 @@ impl App {
             Action::SelectNext => self.select_next(),
             Action::Activate => self.activate(),
             Action::GoBack => self.go_back(),
+            Action::NewCollection => self.open_new_collection_prompt(),
+            Action::RenameCollection => self.open_rename_collection_prompt(),
+            Action::DeleteCollection => self.open_delete_collection_prompt(),
+            Action::NewRequest => self.open_new_request_prompt(),
+            Action::RenameRequest => self.open_rename_request_prompt(),
+            Action::DeleteRequest => self.open_delete_request_prompt(),
 
             Action::NextFocus => self.next_focus(),
             Action::MenuPrevious => self.menu_previous(),

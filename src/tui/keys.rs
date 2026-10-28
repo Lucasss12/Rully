@@ -8,6 +8,12 @@ pub(super) enum Action {
     SelectNext,
     Activate,
     GoBack,
+    NewCollection,
+    RenameCollection,
+    DeleteCollection,
+    NewRequest,
+    RenameRequest,
+    DeleteRequest,
 
     NextFocus,
     MenuPrevious,
@@ -63,6 +69,24 @@ const ROOT_KEYS: &[Binding] = &[
         action: Action::Activate,
     },
     Binding {
+        key: KeyCode::Char('n'),
+        modifiers: KeyModifiers::NONE,
+        help: "n new",
+        action: Action::NewCollection,
+    },
+    Binding {
+        key: KeyCode::Char('r'),
+        modifiers: KeyModifiers::NONE,
+        help: "r rename",
+        action: Action::RenameCollection,
+    },
+    Binding {
+        key: KeyCode::Char('d'),
+        modifiers: KeyModifiers::NONE,
+        help: "d delete",
+        action: Action::DeleteCollection,
+    },
+    Binding {
         key: KeyCode::Tab,
         modifiers: KeyModifiers::NONE,
         help: "tab",
@@ -94,6 +118,24 @@ const COLLECTION_KEYS: &[Binding] = &[
         modifiers: KeyModifiers::NONE,
         help: "↵ open",
         action: Action::Activate,
+    },
+    Binding {
+        key: KeyCode::Char('n'),
+        modifiers: KeyModifiers::NONE,
+        help: "n new request",
+        action: Action::NewRequest,
+    },
+    Binding {
+        key: KeyCode::Char('r'),
+        modifiers: KeyModifiers::NONE,
+        help: "r rename request",
+        action: Action::RenameRequest,
+    },
+    Binding {
+        key: KeyCode::Char('d'),
+        modifiers: KeyModifiers::NONE,
+        help: "d delete request",
+        action: Action::DeleteRequest,
     },
     Binding {
         key: KeyCode::Tab,
@@ -176,7 +218,7 @@ const REQUEST_BAR_KEYS: &[Binding] = &[
     Binding {
         key: KeyCode::Char('s'),
         modifiers: KeyModifiers::CONTROL,
-        help: "ctrl+s save",
+        help: "ctrl+s save request",
         action: Action::Save,
     },
     Binding {
@@ -239,7 +281,7 @@ const REQUEST_KEYS: &[Binding] = &[
     Binding {
         key: KeyCode::Char('s'),
         modifiers: KeyModifiers::CONTROL,
-        help: "ctrl+s save",
+        help: "ctrl+s save request",
         action: Action::Save,
     },
     Binding {
@@ -287,7 +329,7 @@ const EDIT_KEYS: &[Binding] = &[
     Binding {
         key: KeyCode::Char('s'),
         modifiers: KeyModifiers::CONTROL,
-        help: "ctrl+s save",
+        help: "ctrl+s save request",
         action: Action::SubmitEdit,
     },
 ];

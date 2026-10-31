@@ -5,7 +5,7 @@ use rully_core::http;
 use rully_core::request::Request;
 use rully_core::response::Response;
 
-fn pretty_print_json(body: &str) -> Option<String> {
+pub(crate) fn pretty_print_json(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     serde_json::to_string_pretty(&value).ok()
 }

@@ -1,6 +1,7 @@
 use std::{
     io,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -14,9 +15,7 @@ use ratatui_textarea::{CursorMove, TextArea};
 
 use reqwest::Method;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
-use rully_core::errors::AppError;
-use rully_core::store;
-use rully_core::{http_file, request::Request};
+use rully_core::{errors::AppError, http, http_file, request::Request, response::Response, store};
 
 pub fn run(root: PathBuf) -> Result<(), AppError> {
     ratatui::run(|terminal| App::new(root).run(terminal)).map_err(AppError::Terminal)
@@ -45,6 +44,7 @@ mod response_panel;
 
 mod content;
 use content::{AUTH_KINDS, AuthKind, BODY_KINDS, BodyKind};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 #[derive(Debug)]
 struct App {
@@ -58,6 +58,12 @@ struct App {
     // Loaded request (request bar + request panel).
     draft: Option<Draft>,    // the request being viewed, once one is loaded
     request_tab: RequestTab, // active request tab: Headers or Body
+
+    send: SendState,
+    client: reqwest::Client,
+    response_tx: UnboundedSender<Result<Response, AppError>>,
+    response_rx: UnboundedReceiver<Result<Response, AppError>>,
+    pending: Option<Request>,
 
     edit_mode: EditMode,
     edit_input: TextArea<'static>,
@@ -329,6 +335,15 @@ impl Draft {
     }
 }
 
+#[allow(dead_code)]
+#[derive(Debug)]
+enum SendState {
+    Idle,
+    Sending,
+    Done(Response),
+    Failed(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum EditMode {
     None,
@@ -542,6 +557,7 @@ fn request_display_name(name: &str) -> &str {
 }
 
 const METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 
 impl App {
     /// Runs the draw/read-keys loop until `quit` is dispatched.
@@ -549,11 +565,14 @@ impl App {
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
+            self.spawn_pending();
+            self.receive_responses();
         }
         Ok(())
     }
 
     fn new(root: PathBuf) -> Self {
+        let (response_tx, response_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = Self {
             root,
             items: Vec::new(),
@@ -570,6 +589,11 @@ impl App {
             edit_mode: EditMode::None,
             edit_input: TextArea::default(),
             prompt: None,
+            send: SendState::Idle,
+            client: http::default_client().expect("reqwest client builds without network access"),
+            response_tx,
+            response_rx,
+            pending: None,
         };
         app.refresh();
         app
@@ -664,7 +688,7 @@ impl App {
             self.edit_mode,
             &self.edit_input,
         );
-        response_panel::render(frame, response, self.focus == Focus::Response);
+        response_panel::render(frame, response, self.focus == Focus::Response, &self.send);
 
         let menu_open = self.method_menu.open || self.body_menu.open || self.auth_menu.open;
 
@@ -723,6 +747,10 @@ impl App {
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
+        if !event::poll(EVENT_POLL_TIMEOUT)? {
+            return Ok(());
+        }
+
         match event::read()? {
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 self.handle_key_event(key_event)
@@ -1059,6 +1087,8 @@ impl App {
             Action::Save => self.save_current_request(),
             Action::SubmitEdit => self.submit_edit(),
             Action::CancelEdit => self.cancel_edit(),
+
+            Action::Send => self.send_request(),
         }
     }
 
@@ -1365,6 +1395,53 @@ impl App {
     fn cancel_edit(&mut self) {
         self.edit_mode = EditMode::None;
         self.edit_input = TextArea::default();
+    }
+
+    fn send_request(&mut self) {
+        if matches!(self.send, SendState::Sending) {
+            return;
+        }
+        let Some(draft) = &self.draft else {
+            self.send = SendState::Failed("no request loaded".to_string());
+            return;
+        };
+        if draft.relative.is_none() {
+            self.send = SendState::Failed("no request loaded".to_string());
+            return;
+        }
+        match draft.to_request() {
+            Ok(request) => {
+                self.pending = Some(request);
+                self.error = None;
+                self.send = SendState::Sending;
+            }
+            Err(error) => self.send = SendState::Failed(error.to_string()),
+        }
+    }
+
+    fn spawn_pending(&mut self) {
+        let Some(request) = self.pending.take() else {
+            return;
+        };
+        let sender = self.response_tx.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let result = http::execute(&client, &request).await;
+            let _ = sender.send(result);
+        });
+    }
+
+    fn receive_responses(&mut self) {
+        while let Ok(result) = self.response_rx.try_recv() {
+            self.apply_response(result);
+        }
+    }
+
+    fn apply_response(&mut self, result: Result<Response, AppError>) {
+        self.send = match result {
+            Ok(response) => SendState::Done(response),
+            Err(error) => SendState::Failed(error.to_string()),
+        };
     }
 }
 

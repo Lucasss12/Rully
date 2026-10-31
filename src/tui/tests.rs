@@ -1,8 +1,10 @@
 use super::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend, style::Color};
+use reqwest::StatusCode;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 type TestTerminal = Terminal<TestBackend>;
 
@@ -1717,4 +1719,323 @@ fn q_exits() {
     press(&mut app, KeyCode::Char('q'));
 
     assert!(app.exit);
+}
+
+#[test]
+fn shows_the_sending_state() {
+    let fixture = Fixture::new("send-sending");
+    let mut app = App::new(fixture.root());
+    app.send = SendState::Sending;
+
+    let mut terminal = terminal();
+    draw(&mut app, &mut terminal);
+
+    assert!(screen(&terminal).contains("Sending…"));
+}
+
+#[test]
+fn pretty_prints_a_json_response_body() {
+    let fixture = Fixture::new("send-done");
+    let mut app = App::new(fixture.root());
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    app.send = SendState::Done(Response::new(
+        StatusCode::OK,
+        headers,
+        br#"{"name":"John"}"#.to_vec(),
+        Duration::from_millis(142),
+    ));
+
+    let mut terminal = terminal();
+    draw(&mut app, &mut terminal);
+
+    let text = screen(&terminal);
+    assert!(text.contains("200 OK"), "{text}");
+    assert!(text.contains("142 ms"), "{text}");
+    assert!(text.contains("content-type:"), "{text}");
+    assert!(text.contains("\"name\": \"John\""), "{text}");
+}
+
+#[test]
+fn shows_a_failed_send() {
+    let fixture = Fixture::new("send-failed");
+    let mut app = App::new(fixture.root());
+    app.send = SendState::Failed("Connection refused".to_string());
+
+    let mut terminal = terminal();
+    draw(&mut app, &mut terminal);
+
+    assert!(screen(&terminal).contains("Connection refused"));
+}
+
+#[test]
+fn the_send_key_marks_the_request_as_sending() {
+    let fixture = Fixture::new("send-key");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('s'));
+
+    assert!(matches!(app.send, SendState::Sending));
+    draw(&mut app, &mut terminal);
+    assert!(screen(&terminal).contains("Sending…"));
+}
+
+#[test]
+fn send_without_a_loaded_request_fails() {
+    let fixture = Fixture::empty("send-no-request");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    press(&mut app, KeyCode::Char('s'));
+
+    assert!(matches!(app.send, SendState::Failed(_)));
+    draw(&mut app, &mut terminal);
+    let text = screen(&terminal);
+    assert!(text.contains("no request loaded"), "{text}");
+}
+
+#[test]
+fn send_with_an_invalid_url_fails_before_sending() {
+    let fixture = Fixture::new("send-invalid-url");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    app.draft.as_mut().unwrap().url = "not a url".to_string();
+
+    press(&mut app, KeyCode::Char('s'));
+
+    assert!(matches!(app.send, SendState::Failed(_)));
+    assert!(!matches!(app.send, SendState::Sending));
+}
+
+#[test]
+fn send_key_types_a_letter_while_editing() {
+    let fixture = Fixture::new("send-while-editing");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('e'));
+    assert_eq!(app.edit_mode, EditMode::Url);
+
+    press(&mut app, KeyCode::Char('s'));
+
+    assert_eq!(app.edit_mode, EditMode::Url);
+    assert!(
+        app.edit_input.lines().join("").ends_with('s'),
+        "{:?}",
+        app.edit_input.lines()
+    );
+    assert!(matches!(app.send, SendState::Idle));
+}
+
+#[test]
+fn send_queues_a_pending_request() {
+    let fixture = Fixture::new("send-pending");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('s'));
+
+    assert!(
+        app.pending.is_some(),
+        "the validated request waits for spawn"
+    );
+    assert!(matches!(app.send, SendState::Sending));
+}
+
+#[test]
+fn a_queued_response_replaces_sending_with_done() {
+    let fixture = Fixture::new("send-drain-done");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('s'));
+    assert!(matches!(app.send, SendState::Sending));
+
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    app.response_tx
+        .send(Ok(Response::new(
+            StatusCode::OK,
+            headers,
+            br#"{"ok":true}"#.to_vec(),
+            Duration::from_millis(12),
+        )))
+        .unwrap();
+    app.receive_responses();
+
+    assert!(matches!(app.send, SendState::Done(_)));
+    draw(&mut app, &mut terminal);
+    let text = screen(&terminal);
+    assert!(text.contains("200 OK"), "{text}");
+    assert!(text.contains("\"ok\": true"), "{text}");
+}
+
+#[test]
+fn a_failed_response_is_shown_in_the_panel() {
+    let fixture = Fixture::new("send-drain-failed");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('s'));
+
+    app.response_tx.send(Err(AppError::Timeout)).unwrap();
+    app.receive_responses();
+
+    assert!(matches!(app.send, SendState::Failed(_)));
+    draw(&mut app, &mut terminal);
+    let text = screen(&terminal);
+    assert!(text.contains("Request timed out"), "{text}");
+}
+
+#[test]
+fn draining_an_empty_channel_keeps_sending() {
+    let fixture = Fixture::new("send-drain-empty");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('s'));
+
+    app.receive_responses();
+
+    assert!(
+        matches!(app.send, SendState::Sending),
+        "an empty channel must not change the state"
+    );
+}
+
+#[test]
+fn quitting_while_sending_does_not_panic() {
+    let fixture = Fixture::new("quit-while-sending");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('s'));
+    assert!(matches!(app.send, SendState::Sending));
+
+    press(&mut app, KeyCode::Char('q'));
+
+    assert!(app.exit);
+    assert!(matches!(app.send, SendState::Sending));
+    assert!(app.pending.is_some());
+}
+
+#[test]
+fn a_second_send_is_ignored_while_in_flight() {
+    let fixture = Fixture::new("double-send");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('s'));
+    assert!(app.pending.is_some());
+
+    app.pending = None; // simulates the take() done by spawn_pending
+    press(&mut app, KeyCode::Char('s'));
+
+    assert!(
+        app.pending.is_none(),
+        "the guard must not queue a second launch"
+    );
+    assert!(matches!(app.send, SendState::Sending));
+}
+
+#[test]
+fn sending_again_after_a_response_works() {
+    let fixture = Fixture::new("resend-after-done");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('s'));
+    app.response_tx
+        .send(Ok(Response::new(
+            StatusCode::OK,
+            HeaderMap::new(),
+            b"ok".to_vec(),
+            Duration::from_millis(3),
+        )))
+        .unwrap();
+    app.receive_responses();
+    assert!(matches!(app.send, SendState::Done(_)));
+
+    press(&mut app, KeyCode::Char('s'));
+
+    assert!(
+        matches!(app.send, SendState::Sending),
+        "a finished response must not block a new send"
+    );
+    assert!(app.pending.is_some());
+}
+
+#[test]
+fn the_send_key_is_ignored_while_typing_in_a_prompt() {
+    let fixture = Fixture::empty("send-in-prompt");
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Char('n'));
+    assert!(app.prompt.is_some());
+
+    press(&mut app, KeyCode::Char('s'));
+
+    let prompt = app.prompt.as_ref().expect("the prompt stays open");
+    assert_eq!(prompt.input.lines().join(""), "s");
+    assert!(matches!(app.send, SendState::Idle));
+}
+
+#[test]
+fn walks_the_full_send_state_sequence() {
+    let fixture = Fixture::new("send-state-sequence");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+
+    assert!(matches!(app.send, SendState::Idle));
+
+    // Idle -> Sending
+    press(&mut app, KeyCode::Char('s'));
+    assert!(matches!(app.send, SendState::Sending));
+
+    // Sending -> Done
+    app.response_tx
+        .send(Ok(Response::new(
+            StatusCode::OK,
+            HeaderMap::new(),
+            b"ok".to_vec(),
+            Duration::from_millis(3),
+        )))
+        .unwrap();
+    app.receive_responses();
+    assert!(matches!(app.send, SendState::Done(_)));
+
+    // Done -> Sending
+    press(&mut app, KeyCode::Char('s'));
+    assert!(matches!(app.send, SendState::Sending));
+
+    // Sending -> Failed
+    app.response_tx.send(Err(AppError::Timeout)).unwrap();
+    app.receive_responses();
+    assert!(matches!(app.send, SendState::Failed(_)));
+
+    // Failed -> Sending
+    press(&mut app, KeyCode::Char('s'));
+    assert!(matches!(app.send, SendState::Sending));
+
+    draw(&mut app, &mut terminal);
+    assert!(screen(&terminal).contains("Sending…"));
 }

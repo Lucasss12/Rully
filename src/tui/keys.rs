@@ -34,6 +34,8 @@ pub(super) enum Action {
     Save,
     SubmitEdit,
     CancelEdit,
+
+    Send,
 }
 
 pub(super) struct Binding {
@@ -87,6 +89,12 @@ const ROOT_KEYS: &[Binding] = &[
         action: Action::DeleteCollection,
     },
     Binding {
+        key: KeyCode::Char('s'),
+        modifiers: KeyModifiers::NONE,
+        help: "s send",
+        action: Action::Send,
+    },
+    Binding {
         key: KeyCode::Tab,
         modifiers: KeyModifiers::NONE,
         help: "tab",
@@ -136,6 +144,12 @@ const COLLECTION_KEYS: &[Binding] = &[
         modifiers: KeyModifiers::NONE,
         help: "d delete request",
         action: Action::DeleteRequest,
+    },
+    Binding {
+        key: KeyCode::Char('s'),
+        modifiers: KeyModifiers::NONE,
+        help: "s send",
+        action: Action::Send,
     },
     Binding {
         key: KeyCode::Tab,
@@ -222,6 +236,12 @@ const REQUEST_BAR_KEYS: &[Binding] = &[
         action: Action::Save,
     },
     Binding {
+        key: KeyCode::Char('s'),
+        modifiers: KeyModifiers::NONE,
+        help: "s send",
+        action: Action::Send,
+    },
+    Binding {
         key: KeyCode::Tab,
         modifiers: KeyModifiers::NONE,
         help: "tab",
@@ -285,6 +305,12 @@ const REQUEST_KEYS: &[Binding] = &[
         action: Action::Save,
     },
     Binding {
+        key: KeyCode::Char('s'),
+        modifiers: KeyModifiers::NONE,
+        help: "s send",
+        action: Action::Send,
+    },
+    Binding {
         key: KeyCode::Tab,
         modifiers: KeyModifiers::NONE,
         help: "tab",
@@ -304,6 +330,12 @@ const RESPONSE_KEYS: &[Binding] = &[
         modifiers: KeyModifiers::NONE,
         help: "q quit",
         action: Action::Quit,
+    },
+    Binding {
+        key: KeyCode::Char('s'),
+        modifiers: KeyModifiers::NONE,
+        help: "s send",
+        action: Action::Send,
     },
     Binding {
         key: KeyCode::Tab,

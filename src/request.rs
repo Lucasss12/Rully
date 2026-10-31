@@ -2,6 +2,7 @@ use crate::errors::AppError;
 use reqwest::header::{CONTENT_TYPE, HeaderMap};
 use reqwest::{Method, Url};
 
+#[derive(Debug)]
 pub struct Request {
     pub method: Method,
     pub url: Url,

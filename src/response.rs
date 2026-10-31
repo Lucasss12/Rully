@@ -2,6 +2,7 @@ use reqwest::StatusCode;
 use reqwest::header::{CONTENT_TYPE, HeaderMap};
 use std::time::Duration;
 
+#[derive(Debug)]
 pub struct Response {
     pub status: StatusCode,
     pub headers: HeaderMap,

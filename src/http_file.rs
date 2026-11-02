@@ -1,7 +1,7 @@
 use crate::errors::AppError;
 use crate::request::Request;
 use reqwest::Method;
-use reqwest::header::{HeaderName, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use std::fs;
 
 pub struct HttpFile {
@@ -17,6 +17,26 @@ impl HttpFile {
     /// blank lines there, so this is what the TUI preserves when saving.
     pub fn comments(&self) -> &[String] {
         &self.comments
+    }
+
+    /// The request line method, exactly as written in the file.
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    /// The request line URL, exactly as written — placeholders such as
+    /// `{{base_url}}` are still in place, which is what lets the TUI show and
+    /// save a template before it is interpolated at send time.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    pub fn body(&self) -> Option<&str> {
+        self.body.as_deref()
+    }
+
+    pub fn headers(&self) -> &[(String, String)] {
+        &self.headers
     }
 }
 
@@ -106,9 +126,29 @@ pub fn is_request_path(path: &str) -> bool {
 /// Callers that need to preserve them, such as the TUI, prepend the lines from
 /// `HttpFile::comments`.
 pub fn to_string(request: &Request) -> Result<String, AppError> {
-    let mut out = format!("{} {}\n", request.method, request.url);
+    to_string_parts(
+        request.method.as_str(),
+        request.url.as_str(),
+        &request.headers,
+        request.body.as_deref(),
+    )
+}
 
-    for (name, value) in request.headers.iter() {
+/// Serialises raw request parts back to the file format.
+///
+/// The TUI saves from its draft, whose URL may still be a `{{placeholder}}`
+/// template that `Url::parse` would reject — serialising the raw strings is
+/// what keeps templates intact on disk. `to_string` is this function behind a
+/// parsed `Request`, so both share one formatting implementation.
+pub fn to_string_parts(
+    method: &str,
+    url: &str,
+    headers: &HeaderMap,
+    body: Option<&str>,
+) -> Result<String, AppError> {
+    let mut out = format!("{method} {url}\n");
+
+    for (name, value) in headers.iter() {
         let value = value
             .to_str()
             .map_err(|_| AppError::InvalidHeader(format!("non-UTF8 value: {name}")))?;
@@ -116,7 +156,7 @@ pub fn to_string(request: &Request) -> Result<String, AppError> {
         out.push_str(&format!("{name}: {value}\n"));
     }
 
-    if let Some(body) = &request.body {
+    if let Some(body) = body {
         out.push('\n');
         out.push_str(body);
         // Exactly one newline, always. `parse` drops the last line break, so a
@@ -138,6 +178,16 @@ fn to_method(method: &str) -> Result<Method, AppError> {
 }
 
 fn add_headers(request: &mut Request, headers: &[(String, String)]) -> Result<(), AppError> {
+    request.headers = headers_from_pairs(headers)?;
+    Ok(())
+}
+
+/// Converts parsed `Name: value` pairs into a `HeaderMap`, keeping duplicate
+/// names as repeated entries. Shared by `TryFrom<HttpFile>` and the TUI, which
+/// builds a draft without parsing the URL.
+pub fn headers_from_pairs(headers: &[(String, String)]) -> Result<HeaderMap, AppError> {
+    let mut map = HeaderMap::new();
+
     for (name, value) in headers {
         let header_name = HeaderName::from_bytes(name.trim().as_bytes()).map_err(|_| {
             AppError::InvalidHeader(format!("Invalid header name: {}", name.trim()))
@@ -146,10 +196,10 @@ fn add_headers(request: &mut Request, headers: &[(String, String)]) -> Result<()
         let header_value = HeaderValue::from_str(value.trim())
             .map_err(|_| AppError::InvalidHeader(format!("Invalid header value: {name}")))?;
 
-        request.headers.append(header_name, header_value);
+        map.append(header_name, header_value);
     }
 
-    Ok(())
+    Ok(map)
 }
 
 impl TryFrom<HttpFile> for Request {

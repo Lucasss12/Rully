@@ -1,11 +1,25 @@
 use crate::errors::AppError;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const ROOT_DIR: &str = "rully";
 pub const COLLECTIONS_DIR: &str = "collections";
+pub const ENVIRONMENTS_DIR: &str = "environments";
 pub const CONFIG_FILE: &str = "rully.json";
 pub const SUPPORTED_FORMAT: u32 = 1;
+
+/// Lines appended to the workspace `.gitignore` so real environment files
+/// stay local while `example.env` remains shareable.
+const GITIGNORE_ENV_LINES: [&str; 2] = ["environments/*.env", "!environments/example.env"];
+
+const EXAMPLE_ENV: &str = "# Copy this file to <name>.env and fill in your values.\n\
+                           # Real .env files are gitignored.\n\
+                           base_url = https://api.example.com\n";
+
+/// The skeleton written when creating an environment from the TUI.
+const ENV_TEMPLATE: &str = "# One variable per line: KEY = value\n\
+                            # Lines starting with # are comments.\n";
 
 pub fn find_root(start: &Path) -> Result<PathBuf, AppError> {
     let mut current = Some(start);
@@ -36,6 +50,10 @@ pub fn open(start: &Path) -> Result<PathBuf, AppError> {
 
 pub fn collections_dir(root: &Path) -> PathBuf {
     root.join(COLLECTIONS_DIR)
+}
+
+pub fn environments_dir(root: &Path) -> PathBuf {
+    root.join(ENVIRONMENTS_DIR)
 }
 
 pub fn read_format(root: &Path) -> Result<u32, AppError> {
@@ -69,6 +87,8 @@ pub fn init(root: &Path) -> Result<(), AppError> {
 
     fs::create_dir_all(&collections).map_err(AppError::FileWrite)?;
     write_config(root)?;
+    write_example_environment(root)?;
+    write_env_gitignore(root)?;
 
     Ok(())
 }
@@ -78,6 +98,35 @@ fn write_config(root: &Path) -> Result<(), AppError> {
     let config = format!("{{\n  \"format\": {SUPPORTED_FORMAT}\n}}\n");
 
     fs::write(&path, config).map_err(AppError::FileWrite)
+}
+
+/// Seeds `environments/example.env` so a fresh workspace teaches the format
+/// without ever containing a real secret.
+fn write_example_environment(root: &Path) -> Result<(), AppError> {
+    let directory = environments_dir(root);
+    fs::create_dir_all(&directory).map_err(AppError::FileWrite)?;
+
+    fs::write(directory.join("example.env"), EXAMPLE_ENV).map_err(AppError::FileWrite)
+}
+
+/// Keeps real `.env` files out of Git. An existing `.gitignore` is extended,
+/// never replaced.
+fn write_env_gitignore(root: &Path) -> Result<(), AppError> {
+    let path = root.join(".gitignore");
+    let mut content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(AppError::FileRead(error)),
+    };
+
+    for line in GITIGNORE_ENV_LINES {
+        if !content.lines().any(|existing| existing.trim() == line) {
+            content.push_str(line);
+            content.push('\n');
+        }
+    }
+
+    fs::write(&path, content).map_err(AppError::FileWrite)
 }
 
 pub fn resolve(root: &Path, relative: &str) -> Result<PathBuf, AppError> {
@@ -285,6 +334,188 @@ pub fn validate_name(name: &str) -> Result<(), AppError> {
 
 pub fn list_collections(root: &Path) -> Result<Vec<String>, AppError> {
     list_dir(&collections_dir(root))
+}
+
+/// Lists the environment names (file stems of `*.env`), sorted. A workspace
+/// created before environments existed has no directory yet, which lists as
+/// empty rather than an error.
+pub fn list_environments(root: &Path) -> Result<Vec<String>, AppError> {
+    let directory = environments_dir(root);
+
+    if !directory.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let entries = fs::read_dir(&directory).map_err(AppError::FileRead)?;
+    let mut names = Vec::new();
+
+    for entry in entries {
+        let entry = entry.map_err(AppError::FileRead)?;
+        let path = entry.path();
+
+        if path.extension().is_some_and(|extension| extension == "env")
+            && let Some(name) = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().to_string())
+        {
+            names.push(name);
+        }
+    }
+
+    names.sort();
+
+    Ok(names)
+}
+
+/// Resolves an environment name to its file, rejecting anything that could
+/// escape the environments directory. Both `dev` and `dev.env` name the same
+/// file, matching how the TUI lists file stems.
+pub fn environment_path(root: &Path, name: &str) -> Result<PathBuf, AppError> {
+    if name.contains('/') {
+        return Err(AppError::InvalidRequestName(name.to_string()));
+    }
+    validate_name(name)?;
+
+    let file = if name.ends_with(".env") {
+        name.to_string()
+    } else {
+        format!("{name}.env")
+    };
+
+    Ok(environments_dir(root).join(file))
+}
+
+/// Reads one environment file into its variables.
+pub fn read_environment(root: &Path, name: &str) -> Result<HashMap<String, String>, AppError> {
+    let path = environment_path(root, name)?;
+
+    if !path.is_file() {
+        return Err(AppError::EnvironmentNotFound(name.to_string()));
+    }
+
+    crate::env_file::read(&path)
+}
+
+/// Reads one environment file as written, placeholders, comments and all —
+/// what the TUI editor loads so a save never reformats the file.
+pub fn read_environment_text(root: &Path, name: &str) -> Result<String, AppError> {
+    let path = environment_path(root, name)?;
+
+    if !path.is_file() {
+        return Err(AppError::EnvironmentNotFound(name.to_string()));
+    }
+
+    fs::read_to_string(&path).map_err(AppError::FileRead)
+}
+
+/// Creates an environment from the template, refusing to touch an existing
+/// file.
+pub fn create_environment(root: &Path, name: &str) -> Result<PathBuf, AppError> {
+    let path = environment_path(root, name)?;
+
+    if path.exists() {
+        return Err(AppError::EnvironmentAlreadyExists(name.to_string()));
+    }
+
+    fs::create_dir_all(environments_dir(root)).map_err(AppError::FileWrite)?;
+    write_atomic(&path, ENV_TEMPLATE)?;
+
+    Ok(path)
+}
+
+/// Renames an environment file, refusing to overwrite another one.
+pub fn rename_environment(root: &Path, from: &str, to: &str) -> Result<PathBuf, AppError> {
+    let source = environment_path(root, from)?;
+    let target = environment_path(root, to)?;
+
+    if !source.is_file() {
+        return Err(AppError::EnvironmentNotFound(from.to_string()));
+    }
+
+    if source == target {
+        return Ok(source);
+    }
+
+    if target.exists() {
+        return Err(AppError::EnvironmentAlreadyExists(to.to_string()));
+    }
+
+    fs::rename(&source, &target).map_err(AppError::FileWrite)?;
+
+    Ok(target)
+}
+
+pub fn delete_environment(root: &Path, name: &str) -> Result<(), AppError> {
+    let path = environment_path(root, name)?;
+
+    if !path.is_file() {
+        return Err(AppError::EnvironmentNotFound(name.to_string()));
+    }
+
+    fs::remove_file(&path).map_err(AppError::FileWrite)
+}
+
+/// Rewrites an environment that already exists. The content is written
+/// atomically; callers validate it first.
+pub fn overwrite_environment(root: &Path, name: &str, content: &str) -> Result<PathBuf, AppError> {
+    let path = environment_path(root, name)?;
+
+    if !path.is_file() {
+        return Err(AppError::EnvironmentNotFound(name.to_string()));
+    }
+
+    write_atomic(&path, content)?;
+
+    Ok(path)
+}
+
+/// The environment selected in `rully.json`, if any.
+pub fn active_environment(root: &Path) -> Result<Option<String>, AppError> {
+    let source = fs::read_to_string(root.join(CONFIG_FILE)).map_err(AppError::FileRead)?;
+    let value: serde_json::Value = serde_json::from_str(&source).map_err(AppError::InvalidJson)?;
+
+    Ok(value
+        .get("environment")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string))
+}
+
+/// Stores the selected environment in `rully.json`, preserving the other keys.
+pub fn set_active_environment(root: &Path, name: &str) -> Result<(), AppError> {
+    let path = root.join(CONFIG_FILE);
+    let source = fs::read_to_string(&path).map_err(AppError::FileRead)?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(&source).map_err(AppError::InvalidJson)?;
+
+    let object = value.as_object_mut().ok_or_else(|| {
+        AppError::InvalidHttpFile("`rully.json` must contain a JSON object".to_string())
+    })?;
+    object.insert(
+        "environment".to_string(),
+        serde_json::Value::String(name.to_string()),
+    );
+
+    let formatted = serde_json::to_string_pretty(&value).map_err(AppError::InvalidJson)?;
+
+    fs::write(&path, format!("{formatted}\n")).map_err(AppError::FileWrite)
+}
+
+/// Removes the selected environment from `rully.json`, keeping the other
+/// keys — used when the active environment is deleted.
+pub fn clear_active_environment(root: &Path) -> Result<(), AppError> {
+    let path = root.join(CONFIG_FILE);
+    let source = fs::read_to_string(&path).map_err(AppError::FileRead)?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(&source).map_err(AppError::InvalidJson)?;
+
+    let object = value.as_object_mut().ok_or_else(|| {
+        AppError::InvalidHttpFile("`rully.json` must contain a JSON object".to_string())
+    })?;
+    object.remove("environment");
+
+    let formatted = serde_json::to_string_pretty(&value).map_err(AppError::InvalidJson)?;
+
+    fs::write(&path, format!("{formatted}\n")).map_err(AppError::FileWrite)
 }
 
 /// Lists the direct contents of a collection: its requests, and the
@@ -1183,5 +1414,246 @@ mod tests {
             request_path(&root, "users/list").unwrap(),
             request_path(&root, "users/list.http").unwrap()
         );
+    }
+
+    // environments
+
+    fn write_environment(root: &Path, name: &str, content: &str) {
+        let directory = environments_dir(root);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join(format!("{name}.env")), content).unwrap();
+    }
+
+    #[test]
+    fn a_workspace_without_environments_lists_none() {
+        // The pre-phase-11 layout: a valid workspace with no environments
+        // directory at all.
+        let root = workspace("env-no-dir");
+        let _project = Project::new(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join(CONFIG_FILE),
+            format!("{{\n  \"format\": {SUPPORTED_FORMAT}\n}}\n"),
+        )
+        .unwrap();
+
+        assert!(list_environments(&root).unwrap().is_empty());
+    }
+
+    #[test]
+    fn lists_environment_files_sorted() {
+        let root = workspace("env-list");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        write_environment(&root, "prod", "a=1\n");
+        write_environment(&root, "dev", "a=1\n");
+        fs::write(environments_dir(&root).join("notes.txt"), "ignored").unwrap();
+
+        assert_eq!(
+            list_environments(&root).unwrap(),
+            vec!["dev", "example", "prod"]
+        );
+    }
+
+    #[test]
+    fn reads_an_environment_file() {
+        let root = workspace("env-read");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        write_environment(&root, "dev", "base_url=https://api.dev.example.com\n");
+
+        let variables = read_environment(&root, "dev").unwrap();
+
+        assert_eq!(variables["base_url"], "https://api.dev.example.com");
+    }
+
+    #[test]
+    fn reports_a_missing_environment() {
+        let root = workspace("env-missing");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+
+        let result = read_environment(&root, "ghost");
+
+        assert!(matches!(result, Err(AppError::EnvironmentNotFound(name)) if name == "ghost"));
+    }
+
+    #[test]
+    fn rejects_an_environment_path_outside_the_directory() {
+        let root = workspace("env-escape");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+
+        let result = read_environment(&root, "../secrets");
+
+        assert!(matches!(result, Err(AppError::InvalidRequestName(_))));
+    }
+
+    #[test]
+    fn stores_and_reads_the_active_environment() {
+        let root = workspace("env-active");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+
+        assert_eq!(active_environment(&root).unwrap(), None);
+
+        set_active_environment(&root, "dev").unwrap();
+
+        assert_eq!(active_environment(&root).unwrap(), Some("dev".to_string()));
+        // The format key survives the rewrite.
+        assert_eq!(read_format(&root).unwrap(), SUPPORTED_FORMAT);
+    }
+
+    #[test]
+    fn init_seeds_the_example_environment_and_gitignore() {
+        let root = workspace("env-init-seed");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+
+        let example = fs::read_to_string(environments_dir(&root).join("example.env")).unwrap();
+        assert!(example.contains("base_url"));
+
+        let gitignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(gitignore.contains("environments/*.env"));
+        assert!(gitignore.contains("!environments/example.env"));
+        // The seeded example must be selectable: it is a real file.
+        assert_eq!(list_environments(&root).unwrap(), vec!["example"]);
+    }
+
+    #[test]
+    fn init_extends_an_existing_gitignore() {
+        let root = workspace("env-init-gitignore");
+        let _project = Project::new(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join(".gitignore"), "target/\n").unwrap();
+
+        init(&root).unwrap();
+
+        let gitignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(gitignore.starts_with("target/\n"));
+        assert!(gitignore.contains("environments/*.env"));
+    }
+
+    // environment CRUD
+
+    #[test]
+    fn creates_an_environment_from_the_template() {
+        let root = workspace("env-create");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+
+        create_environment(&root, "staging").unwrap();
+
+        let text = read_environment_text(&root, "staging").unwrap();
+        assert!(text.contains("KEY = value"), "{text}");
+        assert!(
+            list_environments(&root)
+                .unwrap()
+                .contains(&"staging".to_string())
+        );
+    }
+
+    #[test]
+    fn refuses_to_create_an_existing_environment() {
+        let root = workspace("env-create-twice");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        create_environment(&root, "dev").unwrap();
+
+        let result = create_environment(&root, "dev");
+
+        assert!(matches!(
+            result,
+            Err(AppError::EnvironmentAlreadyExists(name)) if name == "dev"
+        ));
+    }
+
+    #[test]
+    fn renames_an_environment() {
+        let root = workspace("env-rename");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        write_environment(&root, "dev", "a=1\n");
+
+        rename_environment(&root, "dev", "live").unwrap();
+
+        assert!(read_environment(&root, "dev").is_err());
+        assert_eq!(read_environment(&root, "live").unwrap()["a"], "1");
+    }
+
+    #[test]
+    fn refuses_to_rename_onto_an_existing_environment() {
+        let root = workspace("env-rename-existing");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        write_environment(&root, "dev", "a=1\n");
+        write_environment(&root, "live", "b=2\n");
+
+        let result = rename_environment(&root, "dev", "live");
+
+        assert!(matches!(result, Err(AppError::EnvironmentAlreadyExists(_))));
+        assert_eq!(read_environment(&root, "dev").unwrap()["a"], "1");
+        assert_eq!(read_environment(&root, "live").unwrap()["b"], "2");
+    }
+
+    #[test]
+    fn deletes_an_environment_and_reports_a_missing_one() {
+        let root = workspace("env-delete");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        write_environment(&root, "dev", "a=1\n");
+
+        delete_environment(&root, "dev").unwrap();
+
+        assert!(matches!(
+            delete_environment(&root, "dev"),
+            Err(AppError::EnvironmentNotFound(_))
+        ));
+        assert!(
+            list_environments(&root)
+                .unwrap()
+                .contains(&"example".to_string())
+        );
+    }
+
+    #[test]
+    fn environment_text_round_trips_comments_and_order() {
+        let root = workspace("env-text");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        let original = "# my vars\nzeta = 1\nalpha = 2\n";
+        write_environment(&root, "dev", original);
+
+        let text = read_environment_text(&root, "dev").unwrap();
+        overwrite_environment(&root, "dev", &text).unwrap();
+
+        assert_eq!(read_environment_text(&root, "dev").unwrap(), original);
+    }
+
+    #[test]
+    fn refuses_to_overwrite_a_missing_environment() {
+        let root = workspace("env-overwrite-missing");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+
+        let result = overwrite_environment(&root, "ghost", "a=1\n");
+
+        assert!(matches!(result, Err(AppError::EnvironmentNotFound(_))));
+    }
+
+    #[test]
+    fn clears_the_active_environment_keeping_the_format() {
+        let root = workspace("env-clear-active");
+        let _project = Project::new(&root);
+        init(&root).unwrap();
+        set_active_environment(&root, "dev").unwrap();
+
+        clear_active_environment(&root).unwrap();
+
+        assert_eq!(active_environment(&root).unwrap(), None);
+        assert_eq!(read_format(&root).unwrap(), SUPPORTED_FORMAT);
+        // Setting it again still works after the removal.
+        set_active_environment(&root, "dev").unwrap();
+        assert_eq!(active_environment(&root).unwrap(), Some("dev".to_string()));
     }
 }

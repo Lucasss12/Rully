@@ -1,3 +1,4 @@
+pub mod env_file;
 pub mod errors;
 pub mod http;
 pub mod http_file;

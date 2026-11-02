@@ -47,10 +47,18 @@ pub(super) fn render(frame: &mut Frame, area: Rect, prompt: &Prompt) {
                 body,
             );
         }
+        PromptKind::DeleteEnvironment { name } => {
+            frame.render_widget(
+                Paragraph::new(format!("Delete environment \"{name}\"?")).centered(),
+                body,
+            );
+        }
         PromptKind::NewCollection
         | PromptKind::RenameCollection { .. }
         | PromptKind::NewRequest { .. }
-        | PromptKind::RenameRequest { .. } => {
+        | PromptKind::RenameRequest { .. }
+        | PromptKind::NewEnvironment
+        | PromptKind::RenameEnvironment { .. } => {
             frame.render_widget(&prompt.input, body);
         }
     }

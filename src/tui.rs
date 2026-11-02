@@ -9,13 +9,18 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
+    style::{Color, Style},
+    text::Line,
     widgets::{ListState, Paragraph},
 };
 use ratatui_textarea::{CursorMove, TextArea};
 
 use reqwest::Method;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
-use rully_core::{errors::AppError, http, http_file, request::Request, response::Response, store};
+use rully_core::{
+    env_file, errors::AppError, http, http_file, request::Request, response::Response, store,
+};
+use std::collections::HashMap;
 
 pub fn run(root: PathBuf) -> Result<(), AppError> {
     ratatui::run(|terminal| App::new(root).run(terminal)).map_err(AppError::Terminal)
@@ -26,6 +31,9 @@ use keys::Action;
 
 mod left_panel;
 use left_panel::LeftPanel;
+
+mod env_panel;
+use env_panel::EnvPanel;
 
 mod view;
 
@@ -65,6 +73,12 @@ struct App {
     response_rx: UnboundedReceiver<Result<Response, AppError>>,
     pending: Option<Request>,
 
+    // Environments section (below the tree).
+    environments: Vec<String>,         // env names, file stems of `*.env`
+    active_env: Option<String>,        // selected in rully.json, shown with `●`
+    env_vars: HashMap<String, String>, // variables of the active env, resolved at send
+    env_state: ListState,              // cursor inside the environments section
+
     edit_mode: EditMode,
     edit_input: TextArea<'static>,
     prompt: Option<Prompt>,
@@ -91,6 +105,8 @@ enum Focus {
     Request,
     /// The response panel (not populated yet).
     Response,
+    /// The environments section below the tree.
+    Environments,
 }
 
 /// The request being viewed: a decoded `.http` file held in memory. It is a
@@ -220,18 +236,46 @@ impl Draft {
         self.comments.join("\n")
     }
 
-    fn to_request(&self) -> Result<Request, AppError> {
+    /// Builds the request to send, resolving `{{name}}` placeholders against
+    /// `vars` first — an unresolved name fails here, before URL parsing, so
+    /// a template never leaves the machine half-substituted.
+    fn to_request(&self, vars: &HashMap<String, String>) -> Result<Request, AppError> {
+        let url = env_file::interpolate(&self.url, vars)?;
+
+        let mut headers = HeaderMap::new();
+        for (name, value) in &self.headers {
+            let raw = value
+                .to_str()
+                .map_err(|_| AppError::InvalidHeader(format!("non-UTF8 value: {name}")))?;
+            let resolved = env_file::interpolate(raw, vars)?;
+            let resolved = HeaderValue::from_str(&resolved).map_err(|_| {
+                AppError::InvalidHeader(format!("Invalid header value after interpolation: {name}"))
+            })?;
+            headers.append(name.clone(), resolved);
+        }
+
+        let body = self
+            .body
+            .as_deref()
+            .map(|body| env_file::interpolate(body, vars))
+            .transpose()?;
+
         let method = METHODS[self.method_index];
         let method = Method::from_bytes(method.as_bytes())
             .map_err(|_| AppError::InvalidHttpFile(format!("unsupported method: {method}")))?;
 
-        let mut request = Request::new(method, &self.url)?;
-        request.headers = self.headers.clone();
-        request.body = self.body.clone();
+        let mut request = Request::new(method, &url)?;
+        request.headers = headers;
+        request.body = body;
 
         Ok(request)
     }
 
+    /// Serialises the draft back to the file format, placeholders included.
+    ///
+    /// The URL is written raw on purpose: `{{base_url}}/users` is a valid
+    /// template but not a parseable URL, and saving must never interpolate —
+    /// that happens at send time only.
     fn source(&self) -> Result<String, AppError> {
         let mut source = String::new();
 
@@ -240,7 +284,12 @@ impl Draft {
             source.push('\n');
         }
 
-        source.push_str(&http_file::to_string(&self.to_request()?)?);
+        source.push_str(&http_file::to_string_parts(
+            METHODS[self.method_index],
+            &self.url,
+            &self.headers,
+            self.body.as_deref(),
+        )?);
 
         Ok(source)
     }
@@ -352,12 +401,16 @@ enum EditMode {
     Headers,
     Body,
     Auth,
+    Environment,
 }
 
 impl EditMode {
     /// Whether the editor accepts `Enter` as a line break instead of ignoring it.
     fn allows_newline(self) -> bool {
-        matches!(self, Self::Comments | Self::Headers | Self::Body)
+        matches!(
+            self,
+            Self::Comments | Self::Headers | Self::Body | Self::Environment
+        )
     }
 }
 
@@ -403,6 +456,9 @@ enum PromptKind {
     NewRequest { collection: String },
     RenameRequest { collection: String, old: String },
     DeleteRequest { collection: String, name: String },
+    NewEnvironment,
+    RenameEnvironment { old: String },
+    DeleteEnvironment { name: String },
 }
 
 #[derive(Debug)]
@@ -479,10 +535,43 @@ impl Prompt {
         }
     }
 
+    fn new_environment() -> Self {
+        Self {
+            kind: PromptKind::NewEnvironment,
+            input: TextArea::default(),
+            error: None,
+        }
+    }
+
+    fn rename_environment(name: &str) -> Self {
+        let mut input = TextArea::new(vec![name.to_string()]);
+        input.move_cursor(CursorMove::End);
+
+        Self {
+            kind: PromptKind::RenameEnvironment {
+                old: name.to_string(),
+            },
+            input,
+            error: None,
+        }
+    }
+
+    fn delete_environment(name: &str) -> Self {
+        Self {
+            kind: PromptKind::DeleteEnvironment {
+                name: name.to_string(),
+            },
+            input: TextArea::default(),
+            error: None,
+        }
+    }
+
     fn accepts_text(&self) -> bool {
         !matches!(
             &self.kind,
-            PromptKind::DeleteCollection { .. } | PromptKind::DeleteRequest { .. }
+            PromptKind::DeleteCollection { .. }
+                | PromptKind::DeleteRequest { .. }
+                | PromptKind::DeleteEnvironment { .. }
         )
     }
 
@@ -494,6 +583,9 @@ impl Prompt {
             PromptKind::NewRequest { .. } => "New request",
             PromptKind::RenameRequest { .. } => "Rename request",
             PromptKind::DeleteRequest { .. } => "Delete request",
+            PromptKind::NewEnvironment => "New environment",
+            PromptKind::RenameEnvironment { .. } => "Rename environment",
+            PromptKind::DeleteEnvironment { .. } => "Delete environment",
         }
     }
 
@@ -556,6 +648,27 @@ fn request_display_name(name: &str) -> &str {
     name.strip_suffix(".http").unwrap_or(name)
 }
 
+fn prompt_environment_name(input: &TextArea<'_>) -> Result<String, AppError> {
+    let typed = input.lines().join("").trim().to_string();
+
+    if typed.contains('/') {
+        return Err(AppError::InvalidRequestName(
+            "environment names cannot contain '/'".to_string(),
+        ));
+    }
+
+    // The list shows file stems, so `dev.env` and `dev` name the same file.
+    let name = typed.strip_suffix(".env").unwrap_or(&typed).to_string();
+
+    if name.is_empty() {
+        return Err(AppError::InvalidRequestName(
+            "environment name cannot be empty".to_string(),
+        ));
+    }
+
+    Ok(name)
+}
+
 const METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 
@@ -594,8 +707,13 @@ impl App {
             response_tx,
             response_rx,
             pending: None,
+            environments: Vec::new(),
+            active_env: None,
+            env_vars: HashMap::new(),
+            env_state: ListState::default(),
         };
         app.refresh();
+        app.refresh_environments();
         app
     }
 
@@ -643,14 +761,153 @@ impl App {
         }
     }
 
+    /// Reloads the environments list, the selected environment and its
+    /// variables. A workspace created before environments existed simply
+    /// lists none; a selection pointing at a missing file falls back to no
+    /// active environment and reports the problem.
+    fn refresh_environments(&mut self) {
+        match store::list_environments(&self.root) {
+            Ok(names) => self.environments = names,
+            Err(error) => {
+                self.environments.clear();
+                self.error = Some(error.to_string());
+                return;
+            }
+        }
+
+        let selected = match store::active_environment(&self.root) {
+            Ok(selected) => selected,
+            Err(error) => {
+                self.clear_environment();
+                self.error = Some(error.to_string());
+                return;
+            }
+        };
+
+        let Some(name) = selected else {
+            self.clear_environment();
+            return;
+        };
+
+        match store::read_environment(&self.root, &name) {
+            Ok(variables) => {
+                self.active_env = Some(name.clone());
+                self.env_vars = variables;
+                let cursor = self
+                    .environments
+                    .iter()
+                    .position(|entry| *entry == name)
+                    .or_else(|| (!self.environments.is_empty()).then_some(0));
+                self.env_state.select(cursor);
+            }
+            Err(error) => {
+                self.clear_environment();
+                self.error = Some(error.to_string());
+            }
+        }
+    }
+
+    /// Drops the active environment, leaving the cursor on the first entry.
+    fn clear_environment(&mut self) {
+        self.active_env = None;
+        self.env_vars = HashMap::new();
+        self.env_state
+            .select((!self.environments.is_empty()).then_some(0));
+    }
+
+    fn select_next_environment(&mut self) {
+        let len = self.environments.len();
+        if len == 0 {
+            return;
+        }
+
+        let index = self
+            .env_state
+            .selected()
+            .map_or(0, |index| (index + 1) % len);
+        self.env_state.select(Some(index));
+    }
+
+    fn select_previous_environment(&mut self) {
+        let len = self.environments.len();
+        if len == 0 {
+            return;
+        }
+
+        let index =
+            self.env_state.selected().map_or(
+                len - 1,
+                |index| if index == 0 { len - 1 } else { index - 1 },
+            );
+        self.env_state.select(Some(index));
+    }
+
+    /// Loads the highlighted environment, makes it active and persists the
+    /// choice in `rully.json`.
+    fn activate_selected_environment(&mut self) {
+        let Some(index) = self.env_state.selected() else {
+            return;
+        };
+        let Some(name) = self.environments.get(index).cloned() else {
+            return;
+        };
+
+        match store::read_environment(&self.root, &name) {
+            Ok(variables) => {
+                self.active_env = Some(name.clone());
+                self.env_vars = variables;
+                self.error = store::set_active_environment(&self.root, &name)
+                    .err()
+                    .map(|error| error.to_string());
+            }
+            Err(error) => self.error = Some(error.to_string()),
+        }
+    }
+
+    /// The environment under the cursor in the environments section.
+    fn selected_environment_name(&self) -> Option<String> {
+        let index = self.env_state.selected()?;
+        self.environments.get(index).cloned()
+    }
+
+    /// Moves the cursor onto `name` after a refresh, keeping the previous
+    /// position when the name is gone.
+    fn select_environment_cursor(&mut self, name: &str) {
+        if let Some(index) = self.environments.iter().position(|entry| entry == name) {
+            self.env_state.select(Some(index));
+        }
+    }
+
+    /// The entry that should take the cursor after `name` is deleted: the
+    /// next one, or the previous when deleting the last.
+    fn environment_neighbor(&self, name: &str) -> Option<String> {
+        let index = self.environments.iter().position(|entry| entry == name)?;
+        self.environments
+            .get(index + 1)
+            .or_else(|| {
+                index
+                    .checked_sub(1)
+                    .and_then(|previous| self.environments.get(previous))
+            })
+            .cloned()
+    }
+
     fn draw(&mut self, frame: &mut Frame) {
         let title = view::bread_crumb(self.location.as_deref());
         let empty = view::empty_message(self.location.as_deref());
 
         let [main, help] =
             Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
-        let [tree, detail] =
+        let [tree_column, detail] =
             Layout::horizontal([Constraint::Length(30), Constraint::Fill(1)]).areas(main);
+
+        // The environments section is a fixed strip under the tree: borders
+        // included, one row per environment, clamped so it never eats the tree.
+        let env_height = (self.environments.len() + 2).clamp(3, 8) as u16;
+        let [tree, environments] =
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(env_height)])
+                .areas(tree_column);
+
         let [bar, request, response] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Fill(1),
@@ -668,6 +925,16 @@ impl App {
             },
             tree,
             &mut self.state,
+        );
+
+        frame.render_stateful_widget(
+            EnvPanel {
+                environments: &self.environments,
+                active: self.active_env.as_deref(),
+                focused: self.focus == Focus::Environments,
+            },
+            environments,
+            &mut self.env_state,
         );
 
         let draft = self.draft.as_ref();
@@ -737,7 +1004,20 @@ impl App {
 
         if self.edit_mode == EditMode::Comments {
             let area = frame.area();
-            comments_editor::render(frame, area, &self.edit_input);
+            comments_editor::render(frame, area, &self.edit_input, "Comments", None);
+        }
+
+        if self.edit_mode == EditMode::Environment {
+            let area = frame.area();
+            let title = match self.selected_environment_name() {
+                Some(name) => format!("Environment: {name}"),
+                None => "Environment".to_string(),
+            };
+            let footer = Some(match &self.error {
+                Some(error) => Line::from(error.clone()).style(Style::new().fg(Color::Red)),
+                None => Line::from("ctrl+s save · esc cancel").style(view::dim()),
+            });
+            comments_editor::render(frame, area, &self.edit_input, &title, footer);
         }
 
         if let Some(prompt) = &self.prompt {
@@ -954,6 +1234,87 @@ impl App {
                     }
                 }
             }
+            PromptKind::NewEnvironment => {
+                let name = match prompt_environment_name(&prompt.input) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                        return;
+                    }
+                };
+
+                match store::create_environment(&self.root, &name) {
+                    Ok(_) => {
+                        self.error = None;
+                        self.refresh_environments();
+                        self.select_environment_cursor(&name);
+                    }
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                    }
+                }
+            }
+            PromptKind::RenameEnvironment { old } => {
+                let name = match prompt_environment_name(&prompt.input) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                        return;
+                    }
+                };
+
+                match store::rename_environment(&self.root, &old, &name) {
+                    Ok(_) => {
+                        self.error = None;
+
+                        // The active environment follows the rename, in the
+                        // TUI and in `rully.json` alike.
+                        if self.active_env.as_deref() == Some(old.as_str()) {
+                            self.active_env = Some(name.clone());
+                            if let Err(error) = store::set_active_environment(&self.root, &name) {
+                                self.error = Some(error.to_string());
+                            }
+                        }
+
+                        self.refresh_environments();
+                        self.select_environment_cursor(&name);
+                    }
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                    }
+                }
+            }
+            PromptKind::DeleteEnvironment { name } => {
+                let was_active = self.active_env.as_deref() == Some(name.as_str());
+                let neighbor = self.environment_neighbor(&name);
+
+                match store::delete_environment(&self.root, &name) {
+                    Ok(()) => {
+                        self.error = None;
+
+                        if was_active {
+                            self.active_env = None;
+                            self.env_vars = HashMap::new();
+                            if let Err(error) = store::clear_active_environment(&self.root) {
+                                self.error = Some(error.to_string());
+                            }
+                        }
+
+                        self.refresh_environments();
+                        if let Some(neighbor) = neighbor {
+                            self.select_environment_cursor(&neighbor);
+                        }
+                    }
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                    }
+                }
+            }
         }
     }
 
@@ -1004,6 +1365,40 @@ impl App {
 
         if http_file::is_request_path(&entry) {
             self.prompt = Some(Prompt::delete_request(&collection, &entry));
+        }
+    }
+
+    fn open_rename_environment_prompt(&mut self) {
+        if let Some(name) = self.selected_environment_name() {
+            self.prompt = Some(Prompt::rename_environment(&name));
+        }
+    }
+
+    fn open_delete_environment_prompt(&mut self) {
+        if let Some(name) = self.selected_environment_name() {
+            self.prompt = Some(Prompt::delete_environment(&name));
+        }
+    }
+
+    /// Opens the selected environment's file as raw text in the modal editor,
+    /// so comments and variable order survive a save.
+    fn open_environment_editor(&mut self) {
+        let Some(name) = self.selected_environment_name() else {
+            return;
+        };
+
+        match store::read_environment_text(&self.root, &name) {
+            Ok(text) => {
+                let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+                if lines.is_empty() {
+                    lines.push(String::new());
+                }
+
+                self.error = None;
+                self.edit_input = TextArea::new(lines);
+                self.edit_mode = EditMode::Environment;
+            }
+            Err(error) => self.error = Some(error.to_string()),
         }
     }
 
@@ -1074,6 +1469,14 @@ impl App {
             Action::MenuConfirm => self.menu_confirm(),
             Action::MenuCancel => self.menu_cancel(),
 
+            Action::EnvPrevious => self.select_previous_environment(),
+            Action::EnvNext => self.select_next_environment(),
+            Action::EnvSelect => self.activate_selected_environment(),
+            Action::NewEnvironment => self.prompt = Some(Prompt::new_environment()),
+            Action::RenameEnvironment => self.open_rename_environment_prompt(),
+            Action::DeleteEnvironment => self.open_delete_environment_prompt(),
+            Action::EditEnvironment => self.open_environment_editor(),
+
             Action::TabPrevious => self.switch_tab(false),
             Action::TabNext => self.switch_tab(true),
             Action::OpenMethodMenu => self.open_method_menu(),
@@ -1122,24 +1525,28 @@ impl App {
     }
 
     /// Reads and decodes a `.http` file into a `Draft`.
+    ///
+    /// The URL is kept exactly as written — `Request::try_from` would parse it
+    /// and reject `{{placeholder}}` templates, which are only resolved when
+    /// the request is sent.
     fn read_draft(root: &Path, relative: &str) -> Result<Draft, AppError> {
         let path = store::request_path(root, relative)?;
         let file = http_file::read(&path.to_string_lossy())?;
         let comments = file.comments().to_vec();
-        let request = Request::try_from(file)?;
-        let body_kind = BodyKind::of(&request.headers, request.body.as_deref());
+        let headers = http_file::headers_from_pairs(file.headers())?;
+        let body_kind = BodyKind::of(&headers, file.body());
         let method_index = METHODS
             .iter()
-            .position(|method| *method == request.method.as_str())
+            .position(|method| *method == file.method())
             .unwrap_or(0);
 
         Ok(Draft {
             relative: Some(relative.to_string()),
             comments,
             method_index,
-            url: request.url.to_string(),
-            headers: request.headers,
-            body: request.body,
+            url: file.url().to_string(),
+            headers,
+            body: file.body().map(str::to_string),
             body_kind,
         })
     }
@@ -1196,7 +1603,8 @@ impl App {
             Focus::LeftPanel => Focus::RequestBar,
             Focus::RequestBar => Focus::Request,
             Focus::Request => Focus::Response,
-            Focus::Response => Focus::LeftPanel,
+            Focus::Response => Focus::Environments,
+            Focus::Environments => Focus::LeftPanel,
         };
     }
 
@@ -1310,6 +1718,9 @@ impl App {
                 Some(value) => Ok(value),
                 None => return,
             },
+            // The environment editor loads its own file; `start_edit` is
+            // draft-only.
+            EditMode::Environment => return,
         };
 
         let text = match text {
@@ -1331,6 +1742,13 @@ impl App {
     }
 
     fn submit_edit(&mut self) {
+        // The environment editor works on a file, not on the draft — it has
+        // its own validation and write path.
+        if self.edit_mode == EditMode::Environment {
+            self.submit_environment_edit();
+            return;
+        }
+
         let text = self.edit_input.lines().join("\n");
         let mode = self.edit_mode;
         let should_save = self
@@ -1353,6 +1771,8 @@ impl App {
             EditMode::Body => draft.set_body(&text),
             EditMode::Headers => draft.set_headers_from_text(&text),
             EditMode::Auth => draft.set_auth_value(&text),
+            // Returned at the top of this function; here for exhaustiveness.
+            EditMode::Environment => unreachable!("handled at the top of submit_edit"),
         };
 
         match result {
@@ -1366,6 +1786,44 @@ impl App {
                 self.cancel_edit();
             }
             Err(error) => self.error = Some(error.to_string()),
+        }
+    }
+
+    /// Validates the modal text as a dotenv file and writes it back. The file
+    /// is only touched when it parses, and the active environment's variables
+    /// are reloaded so the next send sees the new values.
+    fn submit_environment_edit(&mut self) {
+        let text = self.edit_input.lines().join("\n");
+
+        if let Err(error) = env_file::parse(&text) {
+            self.error = Some(error.to_string());
+            return; // stays in the editor, the footer shows why
+        }
+
+        let Some(name) = self.selected_environment_name() else {
+            self.cancel_edit();
+            return;
+        };
+
+        let content = if text.is_empty() {
+            String::new()
+        } else {
+            format!("{text}\n")
+        };
+
+        if let Err(error) = store::overwrite_environment(&self.root, &name, &content) {
+            self.error = Some(error.to_string());
+            return;
+        }
+
+        self.error = None;
+        self.cancel_edit();
+
+        if self.active_env.as_deref() == Some(name.as_str()) {
+            match store::read_environment(&self.root, &name) {
+                Ok(variables) => self.env_vars = variables,
+                Err(error) => self.error = Some(error.to_string()),
+            }
         }
     }
 
@@ -1409,13 +1867,24 @@ impl App {
             self.send = SendState::Failed("no request loaded".to_string());
             return;
         }
-        match draft.to_request() {
+        match draft.to_request(&self.env_vars) {
             Ok(request) => {
                 self.pending = Some(request);
                 self.error = None;
                 self.send = SendState::Sending;
             }
-            Err(error) => self.send = SendState::Failed(error.to_string()),
+            Err(error) => {
+                let mut message = error.to_string();
+                if matches!(error, AppError::UnknownVariable(_)) {
+                    // Say why the variable is unknown: no environment at all,
+                    // or one that simply lacks the name.
+                    match &self.active_env {
+                        Some(name) => message.push_str(&format!(" (environment: {name})")),
+                        None => message.push_str(" (no environment selected)"),
+                    }
+                }
+                self.send = SendState::Failed(message);
+            }
         }
     }
 

@@ -12,6 +12,10 @@ pub enum AppError {
     Timeout,
     ResponseBody(String),
     InvalidHttpFile(String),
+    InvalidEnvFile(String),
+    UnknownVariable(String),
+    EnvironmentNotFound(String),
+    EnvironmentAlreadyExists(String),
     HttpVersionUnsupported { found: u32, supported: u32 },
     WorkspaceNotFound,
     CollectionNotFound(String),
@@ -51,6 +55,10 @@ impl AppError {
             AppError::Timeout => ErrorCategory::Network,
             AppError::ResponseBody(_) => ErrorCategory::Response,
             AppError::InvalidHttpFile(_) => ErrorCategory::Cli,
+            AppError::InvalidEnvFile(_) => ErrorCategory::Cli,
+            AppError::UnknownVariable(_) => ErrorCategory::Cli,
+            AppError::EnvironmentNotFound(_) => ErrorCategory::Cli,
+            AppError::EnvironmentAlreadyExists(_) => ErrorCategory::Cli,
             AppError::HttpVersionUnsupported { .. } => ErrorCategory::Cli,
             AppError::WorkspaceNotFound => ErrorCategory::Cli,
             AppError::CollectionNotFound(_) => ErrorCategory::Cli,
@@ -109,6 +117,18 @@ impl std::fmt::Display for AppError {
             }
             AppError::InvalidHttpFile(message) => {
                 write!(formatter, "Invalid request file: {message}")
+            }
+            AppError::InvalidEnvFile(message) => {
+                write!(formatter, "Invalid environment file: {message}")
+            }
+            AppError::UnknownVariable(name) => {
+                write!(formatter, "Unknown variable \"{name}\"")
+            }
+            AppError::EnvironmentNotFound(name) => {
+                write!(formatter, "Environment not found: {name}")
+            }
+            AppError::EnvironmentAlreadyExists(name) => {
+                write!(formatter, "Environment already exists: {name}")
             }
             AppError::HttpVersionUnsupported { found, supported } => write!(
                 formatter,
@@ -193,6 +213,16 @@ mod tests {
                 ErrorCategory::Response,
             ),
             (AppError::InvalidHttpFile(String::new()), ErrorCategory::Cli),
+            (AppError::InvalidEnvFile(String::new()), ErrorCategory::Cli),
+            (AppError::UnknownVariable(String::new()), ErrorCategory::Cli),
+            (
+                AppError::EnvironmentNotFound(String::new()),
+                ErrorCategory::Cli,
+            ),
+            (
+                AppError::EnvironmentAlreadyExists(String::new()),
+                ErrorCategory::Cli,
+            ),
             (
                 AppError::HttpVersionUnsupported {
                     found: 2,

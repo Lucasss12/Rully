@@ -28,6 +28,14 @@ pub(super) enum Action {
     OpenAuthMenu,
     FocusLeftPanel,
 
+    EnvPrevious,
+    EnvNext,
+    EnvSelect,
+    NewEnvironment,
+    RenameEnvironment,
+    DeleteEnvironment,
+    EditEnvironment,
+
     EditUrl,
     EditCurrent,
     EditComments,
@@ -351,6 +359,69 @@ const RESPONSE_KEYS: &[Binding] = &[
     },
 ];
 
+const ENV_KEYS: &[Binding] = &[
+    Binding {
+        key: KeyCode::Char('q'),
+        modifiers: KeyModifiers::NONE,
+        help: "q quit",
+        action: Action::Quit,
+    },
+    Binding {
+        key: KeyCode::Up,
+        modifiers: KeyModifiers::NONE,
+        help: "↑ up",
+        action: Action::EnvPrevious,
+    },
+    Binding {
+        key: KeyCode::Down,
+        modifiers: KeyModifiers::NONE,
+        help: "↓ down",
+        action: Action::EnvNext,
+    },
+    Binding {
+        key: KeyCode::Enter,
+        modifiers: KeyModifiers::NONE,
+        help: "↵ select",
+        action: Action::EnvSelect,
+    },
+    Binding {
+        key: KeyCode::Char('n'),
+        modifiers: KeyModifiers::NONE,
+        help: "n new",
+        action: Action::NewEnvironment,
+    },
+    Binding {
+        key: KeyCode::Char('r'),
+        modifiers: KeyModifiers::NONE,
+        help: "r rename",
+        action: Action::RenameEnvironment,
+    },
+    Binding {
+        key: KeyCode::Char('d'),
+        modifiers: KeyModifiers::NONE,
+        help: "d delete",
+        action: Action::DeleteEnvironment,
+    },
+    Binding {
+        key: KeyCode::Char('e'),
+        modifiers: KeyModifiers::NONE,
+        help: "e edit",
+        action: Action::EditEnvironment,
+    },
+    Binding {
+        key: KeyCode::Tab,
+        modifiers: KeyModifiers::NONE,
+        help: "tab",
+        action: Action::NextFocus,
+    },
+    Binding {
+        key: KeyCode::Esc,
+        modifiers: KeyModifiers::NONE,
+        help: "esc back",
+        action: Action::FocusLeftPanel,
+    },
+];
+
 const EDIT_KEYS: &[Binding] = &[
     Binding {
         key: KeyCode::Esc,
@@ -387,6 +458,7 @@ pub(super) fn current_binding(
         Focus::RequestBar => REQUEST_BAR_KEYS,
         Focus::Request => REQUEST_KEYS,
         Focus::Response => RESPONSE_KEYS,
+        Focus::Environments => ENV_KEYS,
     }
 }
 

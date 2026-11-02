@@ -95,6 +95,14 @@ impl Fixture {
         Self::with(name, &[], &[])
     }
 
+    /// Writes an environment file into the workspace. Call before `App::new`,
+    /// which loads the environments at startup.
+    fn environment(&self, name: &str, content: &str) {
+        let directory = self.root().join(store::ENVIRONMENTS_DIR);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join(format!("{name}.env")), content).unwrap();
+    }
+
     fn root(&self) -> PathBuf {
         self.dir.join(store::ROOT_DIR)
     }
@@ -583,6 +591,9 @@ fn tab_cycles_focus() {
 
     press(&mut app, KeyCode::Tab);
     assert_eq!(app.focus, Focus::Response);
+
+    press(&mut app, KeyCode::Tab);
+    assert_eq!(app.focus, Focus::Environments);
 
     press(&mut app, KeyCode::Tab);
     assert_eq!(app.focus, Focus::LeftPanel);
@@ -2038,4 +2049,450 @@ fn walks_the_full_send_state_sequence() {
 
     draw(&mut app, &mut terminal);
     assert!(screen(&terminal).contains("Sending…"));
+}
+
+#[test]
+fn renders_the_environment_section_under_the_tree() {
+    let fixture = Fixture::new("env-section");
+    fixture.environment("dev", "base_url=https://api.dev.example.com\n");
+    fixture.environment("prod", "base_url=https://api.prod.example.com\n");
+    store::set_active_environment(&fixture.root(), "dev").unwrap();
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+
+    let text = screen(&terminal);
+    assert!(text.contains("Environments"), "{text}");
+    assert!(text.contains("● dev"), "{text}");
+    assert!(text.contains("prod"), "{text}");
+    assert_eq!(app.active_env.as_deref(), Some("dev"));
+    assert_eq!(app.env_vars["base_url"], "https://api.dev.example.com");
+}
+
+#[test]
+fn shows_an_empty_environments_section() {
+    let fixture = Fixture::new("env-empty-section");
+    // init seeds `example.env`; drop it so this workspace has none.
+    fs::remove_file(
+        fixture
+            .root()
+            .join(store::ENVIRONMENTS_DIR)
+            .join("example.env"),
+    )
+    .unwrap();
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+
+    let text = screen(&terminal);
+    assert!(text.contains("Environments"), "{text}");
+    assert!(text.contains("No environments found"), "{text}");
+}
+
+#[test]
+fn selecting_an_environment_persists_it_and_loads_its_variables() {
+    let fixture = Fixture::new("env-select");
+    // init seeds `example.env`; drop it so Down lands on prod.
+    fs::remove_file(
+        fixture
+            .root()
+            .join(store::ENVIRONMENTS_DIR)
+            .join("example.env"),
+    )
+    .unwrap();
+    fixture.environment("dev", "base_url=https://api.dev.example.com\n");
+    fixture.environment("prod", "base_url=https://api.prod.example.com\n");
+    let mut app = App::new(fixture.root());
+
+    // Tab from the tree through the right column to the environments section.
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Tab);
+    }
+    assert_eq!(app.focus, Focus::Environments);
+
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+
+    assert_eq!(app.active_env.as_deref(), Some("prod"));
+    assert_eq!(app.env_vars["base_url"], "https://api.prod.example.com");
+
+    let config = fs::read_to_string(fixture.root().join(store::CONFIG_FILE)).unwrap();
+    assert!(config.contains("\"prod\""), "{config}");
+    assert!(config.contains("\"format\""), "{config}");
+}
+
+#[test]
+fn escape_leaves_the_environments_section() {
+    let fixture = Fixture::new("env-escape-focus");
+    let mut app = App::new(fixture.root());
+
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Tab);
+    }
+    assert_eq!(app.focus, Focus::Environments);
+
+    press(&mut app, KeyCode::Esc);
+
+    assert_eq!(app.focus, Focus::LeftPanel);
+}
+
+#[test]
+fn send_resolves_variables_with_the_active_environment() {
+    let fixture = Fixture::with(
+        "send-env-url",
+        &["users"],
+        &[("users/list.http", "GET {{base_url}}/users\n")],
+    );
+    fixture.environment("dev", "base_url=https://api.dev.example.com\n");
+    store::set_active_environment(&fixture.root(), "dev").unwrap();
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('s'));
+
+    assert!(matches!(app.send, SendState::Sending));
+    let pending = app.pending.as_ref().expect("a request waits for spawn");
+    assert_eq!(pending.url.as_str(), "https://api.dev.example.com/users");
+}
+
+#[test]
+fn send_reports_a_missing_variable_without_an_environment() {
+    let fixture = Fixture::with(
+        "send-no-env",
+        &["users"],
+        &[("users/list.http", "GET {{base_url}}/users\n")],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('s'));
+
+    // The context is asserted on the state: the panel is too narrow to fit
+    // the whole message on one line.
+    let SendState::Failed(message) = &app.send else {
+        panic!("expected a failed send, got {:?}", app.send);
+    };
+    assert!(message.contains("no environment selected"), "{message}");
+
+    let mut terminal = terminal();
+    draw(&mut app, &mut terminal);
+    let text = screen(&terminal);
+    assert!(text.contains("Unknown variable \"base_url\""), "{text}");
+}
+
+#[test]
+fn send_reports_a_missing_variable_with_the_active_environment() {
+    let fixture = Fixture::with(
+        "send-env-missing-var",
+        &["users"],
+        &[("users/list.http", "GET {{other_url}}/users\n")],
+    );
+    fixture.environment("dev", "base_url=https://api.dev.example.com\n");
+    store::set_active_environment(&fixture.root(), "dev").unwrap();
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('s'));
+
+    let SendState::Failed(message) = &app.send else {
+        panic!("expected a failed send, got {:?}", app.send);
+    };
+    assert!(message.contains("environment: dev"), "{message}");
+
+    let mut terminal = terminal();
+    draw(&mut app, &mut terminal);
+    let text = screen(&terminal);
+    assert!(text.contains("Unknown variable \"other_url\""), "{text}");
+}
+
+#[test]
+fn saves_a_request_with_placeholders_untouched() {
+    let fixture = Fixture::with(
+        "save-template",
+        &["users"],
+        &[(
+            "users/list.http",
+            "GET {{base_url}}/users\nAuthorization: Bearer {{token}}\n",
+        )],
+    );
+    let mut app = App::new(fixture.root());
+
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    save(&mut app);
+
+    assert!(app.error.is_none(), "{:?}", app.error);
+
+    let path = store::collections_dir(&fixture.root()).join("users/list.http");
+    let saved = fs::read_to_string(path).unwrap();
+    assert!(saved.contains("GET {{base_url}}/users"), "{saved}");
+    // Header names are normalised to lowercase by `HeaderMap` on save.
+    assert!(saved.contains("authorization: Bearer {{token}}"), "{saved}");
+}
+
+#[test]
+fn creates_an_environment_from_a_prompt() {
+    let fixture = Fixture::new("env-crud-create");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Tab);
+    }
+    press(&mut app, KeyCode::Char('n'));
+    draw(&mut app, &mut terminal);
+    assert!(screen(&terminal).contains("New environment"));
+
+    // The list shows file stems, so the `.env` suffix is optional.
+    type_text(&mut app, "staging.env");
+    press(&mut app, KeyCode::Enter);
+
+    assert!(app.prompt.is_none());
+    assert!(app.environments.contains(&"staging".to_string()));
+    assert_eq!(app.selected_environment_name().as_deref(), Some("staging"));
+    assert!(
+        fixture
+            .root()
+            .join(store::ENVIRONMENTS_DIR)
+            .join("staging.env")
+            .is_file()
+    );
+}
+
+#[test]
+fn rejects_an_empty_environment_name() {
+    let fixture = Fixture::new("env-crud-empty-name");
+    let mut app = App::new(fixture.root());
+
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Tab);
+    }
+    press(&mut app, KeyCode::Char('n'));
+    press(&mut app, KeyCode::Enter);
+
+    let prompt = app.prompt.as_ref().expect("the prompt stays open");
+    assert!(
+        prompt
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("cannot be empty")),
+        "{:?}",
+        prompt.error
+    );
+    assert!(!app.environments.contains(&String::new()));
+}
+
+#[test]
+fn rejects_a_duplicate_environment_name() {
+    let fixture = Fixture::new("env-crud-duplicate");
+    let mut app = App::new(fixture.root());
+
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Tab);
+    }
+    press(&mut app, KeyCode::Char('n'));
+    type_text(&mut app, "example"); // seeded by `init`
+    press(&mut app, KeyCode::Enter);
+
+    let prompt = app.prompt.as_ref().expect("the prompt stays open");
+    assert!(
+        prompt
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("already exists")),
+        "{:?}",
+        prompt.error
+    );
+}
+
+#[test]
+fn renames_the_selected_environment() {
+    let fixture = Fixture::new("env-crud-rename");
+    fixture.environment("dev", "base_url=https://api.dev.example.com\n");
+    store::set_active_environment(&fixture.root(), "dev").unwrap();
+    let mut app = App::new(fixture.root());
+
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Tab);
+    }
+    press(&mut app, KeyCode::Char('r'));
+
+    let prompt = app.prompt.as_ref().expect("the prompt should open");
+    assert!(matches!(
+        &prompt.kind,
+        PromptKind::RenameEnvironment { old } if old == "dev"
+    ));
+    assert_eq!(prompt.input.lines().join(""), "dev");
+
+    app.prompt.as_mut().unwrap().input = TextArea::new(vec!["live".to_string()]);
+    press(&mut app, KeyCode::Enter);
+
+    assert!(app.prompt.is_none());
+    assert!(app.environments.contains(&"live".to_string()));
+    assert!(!app.environments.contains(&"dev".to_string()));
+    assert_eq!(app.selected_environment_name().as_deref(), Some("live"));
+    assert!(
+        !fixture
+            .root()
+            .join(store::ENVIRONMENTS_DIR)
+            .join("dev.env")
+            .exists()
+    );
+    assert!(
+        fixture
+            .root()
+            .join(store::ENVIRONMENTS_DIR)
+            .join("live.env")
+            .is_file()
+    );
+}
+
+#[test]
+fn renaming_the_active_environment_keeps_it_active() {
+    let fixture = Fixture::new("env-crud-rename-active");
+    fixture.environment("dev", "base_url=https://api.dev.example.com\n");
+    store::set_active_environment(&fixture.root(), "dev").unwrap();
+    let mut app = App::new(fixture.root());
+
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Tab);
+    }
+    press(&mut app, KeyCode::Char('r'));
+    app.prompt.as_mut().unwrap().input = TextArea::new(vec!["live".to_string()]);
+    press(&mut app, KeyCode::Enter);
+
+    assert_eq!(app.active_env.as_deref(), Some("live"));
+    assert_eq!(app.env_vars["base_url"], "https://api.dev.example.com");
+
+    let config = fs::read_to_string(fixture.root().join(store::CONFIG_FILE)).unwrap();
+    assert!(config.contains("\"live\""), "{config}");
+    assert!(!config.contains("\"dev\""), "{config}");
+}
+
+#[test]
+fn deleting_the_active_environment_clears_the_selection() {
+    let fixture = Fixture::new("env-crud-delete-active");
+    fixture.environment("dev", "base_url=https://api.dev.example.com\n");
+    store::set_active_environment(&fixture.root(), "dev").unwrap();
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Tab);
+    }
+    press(&mut app, KeyCode::Char('d'));
+    draw(&mut app, &mut terminal);
+    assert!(
+        screen(&terminal).contains("Delete environment \"dev\"?"),
+        "{}",
+        screen(&terminal)
+    );
+
+    press(&mut app, KeyCode::Enter);
+
+    assert!(app.prompt.is_none());
+    assert_eq!(app.active_env, None);
+    assert!(app.env_vars.is_empty());
+    assert!(!app.environments.contains(&"dev".to_string()));
+    assert!(
+        !fixture
+            .root()
+            .join(store::ENVIRONMENTS_DIR)
+            .join("dev.env")
+            .exists()
+    );
+
+    let config = fs::read_to_string(fixture.root().join(store::CONFIG_FILE)).unwrap();
+    assert!(!config.contains("\"environment\""), "{config}");
+}
+
+#[test]
+fn edits_environment_variables_in_a_modal() {
+    let fixture = Fixture::new("env-crud-edit");
+    fixture.environment("dev", "base_url = https://api.dev.example.com\n");
+    store::set_active_environment(&fixture.root(), "dev").unwrap();
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Tab);
+    }
+    press(&mut app, KeyCode::Char('e'));
+
+    assert_eq!(app.edit_mode, EditMode::Environment);
+    assert!(app.edit_input.lines().join("\n").contains("base_url"));
+
+    draw(&mut app, &mut terminal);
+    let text = screen(&terminal);
+    assert!(text.contains("Environment: dev"), "{text}");
+    assert!(text.contains("ctrl+s save"), "{text}");
+
+    app.edit_input = TextArea::new(vec![
+        "# edited in the TUI".to_string(),
+        "base_url = https://api.other.example.com".to_string(),
+    ]);
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::None);
+    assert!(app.error.is_none(), "{:?}", app.error);
+
+    let stored = store::read_environment_text(&fixture.root(), "dev").unwrap();
+    assert!(stored.contains("# edited in the TUI"), "{stored}");
+    assert!(stored.contains("https://api.other.example.com"), "{stored}");
+    // The active environment's cache follows the file.
+    assert_eq!(app.env_vars["base_url"], "https://api.other.example.com");
+}
+
+#[test]
+fn rejects_invalid_environment_content_while_editing() {
+    let fixture = Fixture::new("env-crud-edit-invalid");
+    fixture.environment("dev", "base_url = https://api.dev.example.com\n");
+    store::set_active_environment(&fixture.root(), "dev").unwrap();
+    let mut app = App::new(fixture.root());
+
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Tab);
+    }
+    press(&mut app, KeyCode::Char('e'));
+
+    app.edit_input = TextArea::new(vec!["not a valid line".to_string()]);
+    save(&mut app);
+
+    assert_eq!(app.edit_mode, EditMode::Environment, "stays in the editor");
+    let error = app.error.as_deref().expect("the error should be set");
+    assert!(error.contains("line 1"), "{error}");
+
+    let stored = store::read_environment_text(&fixture.root(), "dev").unwrap();
+    assert!(
+        stored.contains("https://api.dev.example.com"),
+        "the file must stay untouched: {stored}"
+    );
+}
+
+#[test]
+fn escape_cancels_the_environment_editor() {
+    let fixture = Fixture::new("env-crud-edit-cancel");
+    fixture.environment("dev", "base_url = https://api.dev.example.com\n");
+    let mut app = App::new(fixture.root());
+
+    for _ in 0..4 {
+        press(&mut app, KeyCode::Tab);
+    }
+    press(&mut app, KeyCode::Char('e'));
+    assert_eq!(app.edit_mode, EditMode::Environment);
+
+    app.edit_input = TextArea::new(vec!["garbage = ".to_string()]);
+    press(&mut app, KeyCode::Esc);
+
+    assert_eq!(app.edit_mode, EditMode::None);
+    assert!(app.error.is_none());
+
+    let stored = store::read_environment_text(&fixture.root(), "dev").unwrap();
+    assert!(stored.contains("api.dev.example.com"), "{stored}");
 }

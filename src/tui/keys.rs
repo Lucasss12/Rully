@@ -44,6 +44,9 @@ pub(super) enum Action {
     CancelEdit,
 
     Send,
+
+    ResponseScrollPrevious,
+    ResponseScrollNext,
 }
 
 pub(super) struct Binding {
@@ -344,6 +347,18 @@ const RESPONSE_KEYS: &[Binding] = &[
         modifiers: KeyModifiers::NONE,
         help: "s send",
         action: Action::Send,
+    },
+    Binding {
+        key: KeyCode::Down,
+        modifiers: KeyModifiers::NONE,
+        help: "↓ down",
+        action: Action::ResponseScrollNext,
+    },
+    Binding {
+        key: KeyCode::Up,
+        modifiers: KeyModifiers::NONE,
+        help: "↑ up",
+        action: Action::ResponseScrollPrevious,
     },
     Binding {
         key: KeyCode::Tab,

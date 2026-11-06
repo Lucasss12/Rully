@@ -72,6 +72,7 @@ struct App {
     response_tx: UnboundedSender<Result<Response, AppError>>,
     response_rx: UnboundedReceiver<Result<Response, AppError>>,
     pending: Option<Request>,
+    response_scroll: u16, // scrolled-down lines inside the response panel
 
     // Environments section (below the tree).
     environments: Vec<String>,         // env names, file stems of `*.env`
@@ -707,6 +708,7 @@ impl App {
             response_tx,
             response_rx,
             pending: None,
+            response_scroll: 0,
             environments: Vec::new(),
             active_env: None,
             env_vars: HashMap::new(),
@@ -852,6 +854,15 @@ impl App {
             return;
         };
 
+        if self.active_env.as_deref() == Some(name.as_str()) {
+            self.active_env = None;
+            self.env_vars = HashMap::new();
+            self.error = store::clear_active_environment(&self.root)
+                .err()
+                .map(|error| error.to_string());
+            return;
+        }
+
         match store::read_environment(&self.root, &name) {
             Ok(variables) => {
                 self.active_env = Some(name.clone());
@@ -955,7 +966,13 @@ impl App {
             self.edit_mode,
             &self.edit_input,
         );
-        response_panel::render(frame, response, self.focus == Focus::Response, &self.send);
+        response_panel::render(
+            frame,
+            response,
+            self.focus == Focus::Response,
+            &self.send,
+            self.response_scroll,
+        );
 
         let menu_open = self.method_menu.open || self.body_menu.open || self.auth_menu.open;
 
@@ -1492,6 +1509,10 @@ impl App {
             Action::CancelEdit => self.cancel_edit(),
 
             Action::Send => self.send_request(),
+
+            Action::ResponseScrollNext => self.scroll_response_next(),
+
+            Action::ResponseScrollPrevious => self.scroll_response_previous(),
         }
     }
 
@@ -1564,6 +1585,7 @@ impl App {
             Ok(draft) => {
                 self.cancel_edit();
                 self.draft = Some(draft);
+                self.response_scroll = 0;
             }
             Err(error) => self.error = Some(error.to_string()),
         }
@@ -1709,6 +1731,12 @@ impl App {
             EditMode::Body => {
                 let body = draft.body.clone().unwrap_or_default();
                 match draft.body_kind {
+                    // Scaffolds for an empty body, one per raw syntax echoing
+                    // the `# ` prompt of comment editing. Both stay valid
+                    // inputs: `{ }` parses as an empty JSON object and the
+                    // form skeleton is a ready `key=value` pair.
+                    BodyKind::Json if body.is_empty() => Ok("{\n\n}".to_string()),
+                    BodyKind::Form if body.is_empty() => Ok("key=value".to_string()),
                     BodyKind::Json => Ok(content::pretty_json(&body).unwrap_or(body)),
                     _ => Ok(body),
                 }
@@ -1863,8 +1891,8 @@ impl App {
             self.send = SendState::Failed("no request loaded".to_string());
             return;
         };
-        if draft.relative.is_none() {
-            self.send = SendState::Failed("no request loaded".to_string());
+        if draft.url.is_empty() {
+            self.send = SendState::Failed("no request to send".to_string());
             return;
         }
         match draft.to_request(&self.env_vars) {
@@ -1906,7 +1934,17 @@ impl App {
         }
     }
 
+    fn scroll_response_next(&mut self) {
+        self.response_scroll = self.response_scroll.saturating_add(1);
+    }
+
+    fn scroll_response_previous(&mut self) {
+        self.response_scroll = self.response_scroll.saturating_sub(1);
+    }
+
     fn apply_response(&mut self, result: Result<Response, AppError>) {
+        // A fresh body starts at the top, whatever the previous scroll was.
+        self.response_scroll = 0;
         self.send = match result {
             Ok(response) => SendState::Done(response),
             Err(error) => SendState::Failed(error.to_string()),

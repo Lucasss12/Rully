@@ -975,6 +975,73 @@ fn confirms_a_new_body_type() {
 }
 
 #[test]
+fn editing_an_empty_json_body_starts_from_a_scaffold() {
+    let fixture = Fixture::new("body-scaffold-json");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('b'));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('e'));
+
+    assert_eq!(app.edit_mode, EditMode::Body);
+    assert_eq!(app.edit_input.lines(), ["{", "", "}"]);
+}
+
+#[test]
+fn editing_an_empty_form_body_starts_from_a_scaffold() {
+    let fixture = Fixture::new("body-scaffold-form");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('b'));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('e'));
+
+    assert_eq!(app.edit_mode, EditMode::Body);
+    assert_eq!(app.edit_input.lines(), ["key=value"]);
+}
+
+#[test]
+fn an_escaped_scaffold_is_not_stored() {
+    let fixture = Fixture::new("body-scaffold-escape");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Right);
+    press(&mut app, KeyCode::Char('b'));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Char('e'));
+    press(&mut app, KeyCode::Esc);
+
+    let draft = app.draft.as_ref().expect("the request should be loaded");
+    assert_eq!(app.edit_mode, EditMode::None);
+    assert_eq!(draft.body, None);
+}
+
+#[test]
 fn choosing_none_hides_the_body_without_losing_it() {
     let fixture = Fixture::with(
         "body-menu-none",
@@ -1780,6 +1847,103 @@ fn shows_a_failed_send() {
 }
 
 #[test]
+fn scrolls_a_long_response_with_down_and_up() {
+    let body = (0..40)
+        .map(|index| format!("row {index:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let fixture = Fixture::new("response-scroll");
+    let mut app = App::new(fixture.root());
+    app.send = SendState::Done(Response::new(
+        StatusCode::OK,
+        HeaderMap::new(),
+        body.into_bytes(),
+        Duration::from_millis(1),
+    ));
+
+    let mut terminal = terminal();
+    draw(&mut app, &mut terminal);
+
+    let text = screen(&terminal);
+    assert!(text.contains("row 01"), "{text}");
+    assert!(!text.contains("row 20"), "{text}");
+
+    app.focus = Focus::Response;
+    for _ in 0..5 {
+        press(&mut app, KeyCode::Down);
+    }
+    draw(&mut app, &mut terminal);
+
+    let text = screen(&terminal);
+    assert!(text.contains("row 05"), "{text}");
+    assert!(!text.contains("row 20"), "{text}");
+
+    for _ in 0..60 {
+        press(&mut app, KeyCode::Down);
+    }
+    draw(&mut app, &mut terminal);
+
+    let text = screen(&terminal);
+    assert!(text.contains("row 39"), "{text}");
+    assert!(!text.contains("row 02"), "{text}");
+
+    // At the clamp the thumb sits on the last row of the track: the bottom
+    // border corner of the panel is replaced by the scrollbar.
+    let row = lines(&terminal)[22].clone();
+    assert!(row.contains("█"), "{row}");
+
+    for _ in 0..100 {
+        press(&mut app, KeyCode::Up);
+    }
+    draw(&mut app, &mut terminal);
+
+    assert!(!screen(&terminal).contains("row 39"));
+    assert!(!lines(&terminal)[22].contains("█"), "{}", screen(&terminal));
+}
+
+#[test]
+fn the_scrollbar_hides_when_the_response_fits() {
+    let fixture = Fixture::new("response-no-scrollbar");
+    let mut app = App::new(fixture.root());
+    app.send = SendState::Done(Response::new(
+        StatusCode::OK,
+        HeaderMap::new(),
+        br#"{"name":"John"}"#.to_vec(),
+        Duration::from_millis(142),
+    ));
+
+    let mut terminal = terminal();
+    draw(&mut app, &mut terminal);
+
+    assert!(!screen(&terminal).contains("█"), "{}", screen(&terminal));
+}
+
+#[test]
+fn a_new_response_resets_the_scroll_to_the_top() {
+    let body = (0..40)
+        .map(|index| format!("row {index:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let fixture = Fixture::new("response-scroll-reset");
+    let mut app = App::new(fixture.root());
+    app.focus = Focus::Response;
+
+    for _ in 0..5 {
+        press(&mut app, KeyCode::Down);
+    }
+    assert_eq!(app.response_scroll, 5);
+
+    app.apply_response(Ok(Response::new(
+        StatusCode::OK,
+        HeaderMap::new(),
+        body.into_bytes(),
+        Duration::from_millis(1),
+    )));
+
+    assert_eq!(app.response_scroll, 0);
+}
+
+#[test]
 fn the_send_key_marks_the_request_as_sending() {
     let fixture = Fixture::new("send-key");
     let mut app = App::new(fixture.root());
@@ -1805,7 +1969,7 @@ fn send_without_a_loaded_request_fails() {
     assert!(matches!(app.send, SendState::Failed(_)));
     draw(&mut app, &mut terminal);
     let text = screen(&terminal);
-    assert!(text.contains("no request loaded"), "{text}");
+    assert!(text.contains("no request to send"), "{text}");
 }
 
 #[test]

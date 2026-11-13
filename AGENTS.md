@@ -2,7 +2,9 @@
 
 Rully is a terminal-first HTTP client written in Rust.
 
-The project starts as a CLI and will eventually evolve into a TUI. The goal is to build a small, useful developer tool while learning idiomatic Rust through real-world development.
+`rully` launches an interactive TUI over collections stored as plain `.http` files under `rully/collections/`. The CLI was dropped: the TUI is the product, and requests stay reviewable in Git.
+
+The goal is to build a small, useful developer tool while learning idiomatic Rust through real-world development.
 
 See [ROADMAP.md](./roadmap.md) for the planned features and project phases.
 

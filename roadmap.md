@@ -179,7 +179,6 @@ rather than by a plan.
 - [x] Edit URL and method
 - [x] Edit headers, body and auth
 - [x] Save back to `.http`, keeping comments intact
-- [ ] Mouse selection, clipboard via OSC 52
 - [x] Initialize a missing workspace on first TUI launch
 - [x] Create a new collection (top level for now)
 - [x] Rename a collection
@@ -190,28 +189,33 @@ rather than by a plan.
 
 ---
 
-## Phase 10 - Environments and History
+## Phase 10 - TUI Send
 
-- [ ] Define variables
-- [ ] Interpolate variables in requests
-- [ ] Add environment files
-- [ ] Select an environment
-- [ ] Support a default environment
-- [ ] Protect secrets from logs and normal output
-- [ ] Request history
+**Goal:** make the response panel real: the TUI executes a request and
+renders the result. Environments will need this to matter.
 
----
-
-## Phase 11 - Streaming
-
-**Goal:** render the body as it arrives instead of waiting for it to be
-complete. The only structural change the TUI forces on the core.
-
-- [ ] Turn `Response.body` into a channel
-- [ ] SSE and chunked responses
-- [ ] Tail-follow, cancel in flight
+- [x] Choose and wire a send key binding
+- [x] Switch the event loop to `event::poll` with a response channel
+- [x] Spawn requests and receive responses asynchronously
+- [x] Track sending state: in flight, response, error
+- [x] Render status, duration, headers and body in the response panel
+- [x] Pretty-print JSON responses in the TUI
+- [x] Display errors in the response panel
+- [x] Handle quit while a request is in flight
+- [x] Test state transitions with the TestBackend harness
 
 ---
+
+## Phase 11 - Environments
+
+- [x] Define variables
+- [x] Interpolate variables in requests
+- [x] Add environment files
+- [x] Select an environment
+- [x] Support a default environment
+- [x] Protect secrets from logs and normal output
+- [x] Create, rename and delete environments from the TUI
+- [x] Edit environment variables from the TUI
 
 ## Phase 12 - Distribution
 
@@ -227,6 +231,14 @@ complete. The only structural change the TUI forces on the core.
 
 ---
 
+## Polish
+- [ ] cancel une requete trop longue
+- [ ] sauvegarde d'une nouvelle url ne fonctionne pas / pas clair
+- [ ] refacto performance
+- [ ] refacto suppresion de la partie cli
+
 ## Later
+
+- [ ] Request history
 
 Once the TUI is stable, the CLI reduces to `rully run <path>` for CI.

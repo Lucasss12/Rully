@@ -86,5 +86,5 @@ fn total_lines(content: &str) -> usize {
 }
 
 fn format_body(response: &Response) -> String {
-    crate::output::pretty_print_json(&response.body).unwrap_or_else(|| response.body.clone())
+    super::content::pretty_json(&response.body).unwrap_or_else(|| response.body.clone())
 }

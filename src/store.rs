@@ -245,7 +245,7 @@ fn write_atomic(path: &Path, content: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Reports a missing collection together with the command that creates it.
+/// Reports a save or rename aimed at a collection that does not exist.
 fn missing_collection(collection: &Path) -> AppError {
     let name = collection
         .file_name()

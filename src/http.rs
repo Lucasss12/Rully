@@ -6,6 +6,9 @@ use std::time::{Duration, Instant};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// Hard cap over the whole request, whatever the server does between
+/// chunks: the per-read timeout alone lets a slow drip run forever.
+const TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
 
 /// Headers Rully declares explicitly.
@@ -45,23 +48,41 @@ fn build_request(client: &reqwest::Client, request: &Request) -> reqwest::Reques
 }
 
 pub async fn execute(client: &reqwest::Client, request: &Request) -> Result<Response, AppError> {
+    execute_with_timeout(client, request, TOTAL_TIMEOUT).await
+}
+
+/// Runs the request under a total duration cap: the cap covers connection,
+/// headers and body reading together.
+pub async fn execute_with_timeout(
+    client: &reqwest::Client,
+    request: &Request,
+    total: Duration,
+) -> Result<Response, AppError> {
     request.validate_json_body()?;
 
     let builder = build_request(client, request);
     let start = Instant::now();
 
-    let raw = match builder.send().await {
-        Ok(response) => response,
-        Err(error) if error.is_timeout() => return Err(AppError::Timeout),
-        Err(error) => return Err(AppError::Network(error.to_string())),
-    };
+    let outcome = tokio::time::timeout(total, async {
+        let raw = match builder.send().await {
+            Ok(response) => response,
+            Err(error) if error.is_timeout() => return Err(AppError::Timeout),
+            Err(error) => return Err(AppError::Network(error.to_string())),
+        };
 
-    let status = raw.status();
-    let headers = raw.headers().clone();
-    let body = raw
-        .bytes()
-        .await
-        .map_err(|error| AppError::ResponseBody(error.to_string()))?;
+        let status = raw.status();
+        let headers = raw.headers().clone();
+        let body = raw
+            .bytes()
+            .await
+            .map_err(|error| AppError::ResponseBody(error.to_string()))?;
 
-    Ok(Response::new(status, headers, body, start.elapsed()))
+        Ok(Response::new(status, headers, body, start.elapsed()))
+    })
+    .await;
+
+    match outcome {
+        Ok(result) => result,
+        Err(_) => Err(AppError::Timeout),
+    }
 }

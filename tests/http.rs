@@ -194,6 +194,17 @@ async fn reports_timeout() {
 }
 
 #[tokio::test]
+async fn reports_a_total_timeout_even_when_the_server_keeps_silence() {
+    // No per-read timeout: only the total cap can end the request.
+    let client = reqwest::Client::builder().build().unwrap();
+    let request = Request::new(Method::GET, "http://10.255.255.1/").unwrap();
+
+    let result = http::execute_with_timeout(&client, &request, Duration::from_millis(150)).await;
+
+    assert!(matches!(result, Err(AppError::Timeout)));
+}
+
+#[tokio::test]
 async fn reports_response_body_error() {
     let server = TestServer::start(vec![TRUNCATED.to_vec()]).await;
     let request = Request::new(Method::GET, &server.url("/")).unwrap();

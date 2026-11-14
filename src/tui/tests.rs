@@ -2030,6 +2030,54 @@ fn the_send_key_marks_the_request_as_sending() {
 }
 
 #[test]
+fn x_cancels_an_in_flight_request_from_any_panel() {
+    let fixture = Fixture::new("send-cancel");
+    let mut app = App::new(fixture.root());
+    app.focus = Focus::Response;
+    app.send = SendState::Sending;
+    app.pending = Some(Request::new(reqwest::Method::GET, "https://api.example.com/slow").unwrap());
+
+    press(&mut app, KeyCode::Char('x'));
+
+    assert!(
+        matches!(&app.send, SendState::Failed(message) if message == "request cancelled"),
+        "{:?}",
+        app.send
+    );
+    assert!(app.pending.is_none());
+
+    // Outside of `Sending`, the key is inert.
+    press(&mut app, KeyCode::Char('x'));
+    assert!(
+        matches!(&app.send, SendState::Failed(message) if message == "request cancelled"),
+        "{:?}",
+        app.send
+    );
+}
+
+#[test]
+fn the_help_line_offers_cancel_only_while_sending() {
+    let fixture = Fixture::new("send-cancel-help");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+    assert!(
+        !screen(&terminal).contains("x cancel"),
+        "{}",
+        screen(&terminal)
+    );
+
+    app.send = SendState::Sending;
+    draw(&mut app, &mut terminal);
+    assert!(
+        screen(&terminal).contains("x cancel"),
+        "{}",
+        screen(&terminal)
+    );
+}
+
+#[test]
 fn send_without_a_loaded_request_fails() {
     let fixture = Fixture::empty("send-no-request");
     let mut app = App::new(fixture.root());

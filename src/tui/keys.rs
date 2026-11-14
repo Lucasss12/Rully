@@ -477,10 +477,14 @@ pub(super) fn current_binding(
     }
 }
 
-pub(super) fn help_line(bindings: &[Binding]) -> String {
-    bindings
-        .iter()
-        .map(|b| b.help)
-        .collect::<Vec<_>>()
-        .join("  ·  ")
+pub(super) fn help_line(bindings: &[Binding], sending: bool) -> String {
+    let mut entries: Vec<&str> = bindings.iter().map(|binding| binding.help).collect();
+
+    // An in-flight request can be cancelled from any panel. First, so it
+    // survives the narrowest terminals.
+    if sending {
+        entries.insert(0, "x cancel");
+    }
+
+    entries.join("  ·  ")
 }

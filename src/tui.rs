@@ -5,7 +5,7 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
@@ -53,6 +53,7 @@ mod response_panel;
 mod content;
 use content::{AUTH_KINDS, AuthKind, BODY_KINDS, BodyKind};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::task::JoinHandle;
 
 #[derive(Debug)]
 struct App {
@@ -72,7 +73,8 @@ struct App {
     response_tx: UnboundedSender<Result<Response, AppError>>,
     response_rx: UnboundedReceiver<Result<Response, AppError>>,
     pending: Option<Request>,
-    response_scroll: u16, // scrolled-down lines inside the response panel
+    pending_task: Option<JoinHandle<()>>, // the in-flight send, abortable
+    response_scroll: u16,                 // scrolled-down lines inside the response panel
 
     // Environments section (below the tree).
     environments: Vec<String>,         // env names, file stems of `*.env`
@@ -741,6 +743,7 @@ impl App {
             response_tx,
             response_rx,
             pending: None,
+            pending_task: None,
             response_scroll: 0,
             environments: Vec::new(),
             active_env: None,
@@ -1008,14 +1011,18 @@ impl App {
         );
 
         let menu_open = self.method_menu.open || self.body_menu.open || self.auth_menu.open;
+        let sending = matches!(self.send, SendState::Sending);
 
         frame.render_widget(
-            Paragraph::new(keys::help_line(keys::current_binding(
-                self.focus,
-                self.location.as_deref(),
-                menu_open,
-                self.edit_mode,
-            ))),
+            Paragraph::new(keys::help_line(
+                keys::current_binding(
+                    self.focus,
+                    self.location.as_deref(),
+                    menu_open,
+                    self.edit_mode,
+                ),
+                sending,
+            )),
             help,
         );
 
@@ -1100,6 +1107,17 @@ impl App {
 
         let menu_open = self.method_menu.open || self.body_menu.open || self.auth_menu.open;
         let editing = self.edit_mode != EditMode::None;
+
+        // While a request is in flight, `x` cancels it from any panel —
+        // except while editing, where it is a plain letter.
+        if !editing
+            && matches!(self.send, SendState::Sending)
+            && key_event.code == KeyCode::Char('x')
+            && key_event.modifiers == KeyModifiers::NONE
+        {
+            self.cancel_send();
+            return;
+        }
 
         let bindings = keys::current_binding(
             self.focus,
@@ -2083,10 +2101,26 @@ impl App {
         };
         let sender = self.response_tx.clone();
         let client = self.client.clone();
-        tokio::spawn(async move {
+        // The handle is kept so an in-flight request can be aborted: aborting
+        // drops the future, which closes the connection underneath.
+        self.pending_task = Some(tokio::spawn(async move {
             let result = http::execute(&client, &request).await;
             let _ = sender.send(result);
-        });
+        }));
+    }
+
+    /// `x` while a request is in flight: aborts the task and reports the
+    /// cancellation in the response panel. No-op otherwise.
+    fn cancel_send(&mut self) {
+        if !matches!(self.send, SendState::Sending) {
+            return;
+        }
+
+        if let Some(task) = self.pending_task.take() {
+            task.abort();
+        }
+        self.pending = None;
+        self.send = SendState::Failed("request cancelled".to_string());
     }
 
     fn receive_responses(&mut self) {
@@ -2106,6 +2140,7 @@ impl App {
     fn apply_response(&mut self, result: Result<Response, AppError>) {
         // A fresh body starts at the top, whatever the previous scroll was.
         self.response_scroll = 0;
+        self.pending_task = None;
         self.send = match result {
             Ok(response) => SendState::Done(response),
             Err(error) => SendState::Failed(error.to_string()),

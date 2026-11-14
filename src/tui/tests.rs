@@ -4,7 +4,7 @@ use ratatui::{Terminal, backend::TestBackend, style::Color};
 use reqwest::StatusCode;
 use std::fs;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 type TestTerminal = Terminal<TestBackend>;
 
@@ -1888,12 +1888,12 @@ fn pretty_prints_a_json_response_body() {
     let mut app = App::new(fixture.root());
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    app.send = SendState::Done(Response::new(
+    app.apply_response(Ok(Response::new(
         StatusCode::OK,
         headers,
         br#"{"name":"John"}"#.to_vec(),
         Duration::from_millis(142),
-    ));
+    )));
 
     let mut terminal = terminal();
     draw(&mut app, &mut terminal);
@@ -1925,12 +1925,12 @@ fn scrolls_a_long_response_with_down_and_up() {
         .join("\n");
     let fixture = Fixture::new("response-scroll");
     let mut app = App::new(fixture.root());
-    app.send = SendState::Done(Response::new(
+    app.apply_response(Ok(Response::new(
         StatusCode::OK,
         HeaderMap::new(),
         body.into_bytes(),
         Duration::from_millis(1),
-    ));
+    )));
 
     let mut terminal = terminal();
     draw(&mut app, &mut terminal);
@@ -1976,12 +1976,12 @@ fn scrolls_a_long_response_with_down_and_up() {
 fn the_scrollbar_hides_when_the_response_fits() {
     let fixture = Fixture::new("response-no-scrollbar");
     let mut app = App::new(fixture.root());
-    app.send = SendState::Done(Response::new(
+    app.apply_response(Ok(Response::new(
         StatusCode::OK,
         HeaderMap::new(),
         br#"{"name":"John"}"#.to_vec(),
         Duration::from_millis(142),
-    ));
+    )));
 
     let mut terminal = terminal();
     draw(&mut app, &mut terminal);
@@ -2778,4 +2778,46 @@ fn escape_cancels_the_environment_editor() {
 
     let stored = store::read_environment_text(&fixture.root(), "dev").unwrap();
     assert!(stored.contains("api.dev.example.com"), "{stored}");
+}
+
+/// Manual performance check, not part of the suite:
+/// `cargo test --bin rully response_draw_benchmark -- --ignored --nocapture`
+#[test]
+#[ignore = "performance measurement only"]
+fn response_draw_benchmark() {
+    // A realistic large body: ~5 MB of pretty-printable JSON.
+    let mut body = String::from("[");
+    for index in 0..25_000 {
+        body.push_str(&format!(
+            r#"{{"name":"user-{index}","id":{index},"data":"{:0<120}"}},"#,
+            "x"
+        ));
+    }
+    body.push_str(r#"{"name":"last","id":0,"data":""}]"#);
+
+    let fixture = Fixture::new("draw-benchmark");
+    let mut app = App::new(fixture.root());
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    app.apply_response(Ok(Response::new(
+        StatusCode::OK,
+        headers,
+        body.into_bytes(),
+        Duration::from_millis(142),
+    )));
+
+    let mut terminal = terminal();
+    draw(&mut app, &mut terminal); // warm-up
+
+    let frames = 100;
+    let start = Instant::now();
+    for _ in 0..frames {
+        draw(&mut app, &mut terminal);
+    }
+    let elapsed = start.elapsed();
+
+    println!(
+        "{frames} draws in {elapsed:?} ({:?} per frame)",
+        elapsed / frames
+    );
 }

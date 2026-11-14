@@ -7,53 +7,88 @@ use ratatui::{
 
 use super::{Response, SendState, view};
 
-pub(super) fn render(frame: &mut Frame, area: Rect, focused: bool, state: &SendState, scroll: u16) {
+/// The response text prepared for display: built once when the response
+/// arrives, then blitted by every frame. Building it is the expensive part
+/// (JSON pretty-printing dominates), so it stays out of the draw path. The
+/// content is kept line-split because `Text::from` on a huge string would
+/// re-split it on every frame.
+#[derive(Debug)]
+pub(super) struct ResponseText {
+    pub(super) lines: Vec<String>,
+}
+
+/// Assembles status, duration, headers and body into the display text,
+/// split on newlines (a trailing `\n` yields a final empty line, as
+/// rendered).
+pub(super) fn build_response_text(response: &Response) -> ResponseText {
+    let headers: Vec<String> = response
+        .headers
+        .iter()
+        .map(|(name, value)| {
+            format!(
+                "{}: {}",
+                name.as_str(),
+                value.to_str().unwrap_or("<non-utf8>")
+            )
+        })
+        .collect();
+
+    let content = format!(
+        "{} {}\n{} ms\n\n{}\n\n{}",
+        response.status.as_u16(),
+        response.status.canonical_reason().unwrap_or(""),
+        response.duration_ms(),
+        headers.join("\n"),
+        super::content::pretty_json(&response.body).unwrap_or_else(|| response.body.clone())
+    );
+
+    ResponseText {
+        lines: content.split('\n').map(str::to_string).collect(),
+    }
+}
+
+pub(super) fn render(
+    frame: &mut Frame,
+    area: Rect,
+    focused: bool,
+    state: &SendState,
+    prepared: Option<&ResponseText>,
+    scroll: u16,
+) {
     let block = Block::bordered()
         .title("Response")
         .border_style(view::border_style(focused));
+    let viewport_height = block.inner(area).height;
 
-    let (content, style) = match state {
-        SendState::Idle => ("No response yet".to_string(), view::dim()),
-        SendState::Sending => ("Sending…".to_string(), view::dim()),
+    let (content, style, total, offset) = match state {
+        SendState::Idle => (String::from("No response yet"), view::dim(), 1, 0),
+        SendState::Sending => (String::from("Sending…"), view::dim(), 1, 0),
         SendState::Done(response) => {
-            let headers: Vec<String> = response
-                .headers
-                .iter()
-                .map(|(name, value)| {
-                    format!(
-                        "{}: {}",
-                        name.as_str(),
-                        value.to_str().unwrap_or("<non-utf8>")
-                    )
-                })
-                .collect();
+            let style = Style::default();
+            // The normal path blits the window of the prepared lines;
+            // a direct `send` assignment bypassing `apply_response` builds
+            // its own lines here, at the usual cost.
+            let lines: &[String] = match prepared {
+                Some(text) => &text.lines,
+                None => &build_response_text(response).lines,
+            };
+            let total = lines.len();
+            let offset = scroll.min(max_offset(total, viewport_height));
 
-            let text = format!(
-                "{} {}\n{} ms\n\n{}\n\n{}",
-                response.status.as_u16(),
-                response.status.canonical_reason().unwrap_or(""),
-                response.duration_ms(),
-                headers.join("\n"),
-                format_body(response)
-            );
-            (text, Style::default())
+            let start = (offset as usize).min(total);
+            let end = (start + viewport_height as usize).min(total);
+            let window = lines[start..end].join("\n");
+
+            (window, style, total, offset)
         }
-        SendState::Failed(message) => (message.clone(), Style::new().fg(Color::Red)),
+        SendState::Failed(message) => (message.clone(), Style::new().fg(Color::Red), 1, 0),
     };
 
-    // The panel height only exists at draw time, so the scroll is clamped
-    // here. One content line always renders on one row (no `.wrap()`), and a
-    // trailing `\n` adds an empty rendered line — counted explicitly in
-    // `total_lines`. The offset comes from app state, guarded by `max_offset`.
-    let viewport_height = block.inner(area).height;
-    let total = total_lines(&content);
-    let offset = scroll.min(max_offset(total, viewport_height));
-
+    // The content handed to the paragraph is exactly the visible window, so
+    // no scroll is applied at the widget level; `offset` only drives the
+    // scrollbar below.
     frame.render_widget(
-        Paragraph::new(content)
-            .style(style)
-            .block(block)
-            .scroll((offset, 0)),
+        Paragraph::new(content.as_str()).style(style).block(block),
         area,
     );
 
@@ -78,13 +113,4 @@ pub(super) fn render(frame: &mut Frame, area: Rect, focused: bool, state: &SendS
 fn max_offset(total_lines: usize, viewport_height: u16) -> u16 {
     let visible = viewport_height as usize;
     u16::try_from(total_lines.saturating_sub(visible)).unwrap_or(u16::MAX)
-}
-
-/// Rendered lines, including the empty one a trailing `\n` produces.
-fn total_lines(content: &str) -> usize {
-    content.lines().count() + usize::from(content.ends_with('\n'))
-}
-
-fn format_body(response: &Response) -> String {
-    super::content::pretty_json(&response.body).unwrap_or_else(|| response.body.clone())
 }

@@ -74,6 +74,7 @@ struct App {
     response_rx: UnboundedReceiver<Result<Response, AppError>>,
     pending: Option<Request>,
     pending_task: Option<JoinHandle<()>>, // the in-flight send, abortable
+    response_text: Option<response_panel::ResponseText>, // display text, built once per response
     response_scroll: u16,                 // scrolled-down lines inside the response panel
 
     // Environments section (below the tree).
@@ -744,6 +745,7 @@ impl App {
             response_rx,
             pending: None,
             pending_task: None,
+            response_text: None,
             response_scroll: 0,
             environments: Vec::new(),
             active_env: None,
@@ -1007,6 +1009,7 @@ impl App {
             response,
             self.focus == Focus::Response,
             &self.send,
+            self.response_text.as_ref(),
             self.response_scroll,
         );
 
@@ -2078,6 +2081,7 @@ impl App {
             Ok(request) => {
                 self.pending = Some(request);
                 self.error = None;
+                self.response_text = None;
                 self.send = SendState::Sending;
             }
             Err(error) => {
@@ -2120,6 +2124,7 @@ impl App {
             task.abort();
         }
         self.pending = None;
+        self.response_text = None;
         self.send = SendState::Failed("request cancelled".to_string());
     }
 
@@ -2138,9 +2143,14 @@ impl App {
     }
 
     fn apply_response(&mut self, result: Result<Response, AppError>) {
-        // A fresh body starts at the top, whatever the previous scroll was.
+        // A fresh body starts at the top, whatever the previous scroll was,
+        // and gets its display text prepared once, here — not per frame.
         self.response_scroll = 0;
         self.pending_task = None;
+        self.response_text = match &result {
+            Ok(response) => Some(response_panel::build_response_text(response)),
+            Err(_) => None,
+        };
         self.send = match result {
             Ok(response) => SendState::Done(response),
             Err(error) => SendState::Failed(error.to_string()),

@@ -75,6 +75,7 @@ struct App {
     pending: Option<Request>,
     pending_task: Option<JoinHandle<()>>, // the in-flight send, abortable
     response_text: Option<response_panel::ResponseText>, // display text, built once per response
+    response_tab: response_panel::ResponseTab, // Body or Headers inside the response panel
     response_scroll: u16,                 // scrolled-down lines inside the response panel
 
     // Environments section (below the tree).
@@ -746,6 +747,7 @@ impl App {
             pending: None,
             pending_task: None,
             response_text: None,
+            response_tab: response_panel::ResponseTab::Body,
             response_scroll: 0,
             environments: Vec::new(),
             active_env: None,
@@ -1009,6 +1011,7 @@ impl App {
             response,
             self.focus == Focus::Response,
             &self.send,
+            self.response_tab,
             self.response_text.as_ref(),
             self.response_scroll,
         );
@@ -1869,7 +1872,16 @@ impl App {
     }
 
     fn switch_tab(&mut self, forward: bool) {
-        self.request_tab = RequestTab::switch_tabs(self.request_tab, forward);
+        match self.focus {
+            // The response cycles its own sections; a switch forgets the
+            // scroll so the new section starts at the top.
+            Focus::Response => {
+                self.response_tab =
+                    response_panel::ResponseTab::switch_tabs(self.response_tab, forward);
+                self.response_scroll = 0;
+            }
+            _ => self.request_tab = RequestTab::switch_tabs(self.request_tab, forward),
+        }
     }
 
     fn edit_current_tab(&mut self) {

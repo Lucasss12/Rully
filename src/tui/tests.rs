@@ -1898,11 +1898,60 @@ fn pretty_prints_a_json_response_body() {
     let mut terminal = terminal();
     draw(&mut app, &mut terminal);
 
+    // The default tab is Body: the status summary and the body, no headers.
     let text = screen(&terminal);
     assert!(text.contains("200 OK"), "{text}");
     assert!(text.contains("142 ms"), "{text}");
-    assert!(text.contains("content-type:"), "{text}");
     assert!(text.contains("\"name\": \"John\""), "{text}");
+    assert!(!text.contains("content-type:"), "{text}");
+
+    app.response_tab = response_panel::ResponseTab::Headers;
+    draw(&mut app, &mut terminal);
+
+    let text = screen(&terminal);
+    assert!(text.contains("content-type:"), "{text}");
+    assert!(!text.contains("\"name\": \"John\""), "{text}");
+}
+
+#[test]
+fn arrows_switch_response_tabs_and_reset_the_scroll() {
+    let body = (0..40)
+        .map(|index| format!("row {index:02}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let fixture = Fixture::new("response-tabs");
+    let mut app = App::new(fixture.root());
+    app.apply_response(Ok(Response::new(
+        StatusCode::OK,
+        HeaderMap::new(),
+        body.into_bytes(),
+        Duration::from_millis(1),
+    )));
+    app.focus = Focus::Response;
+
+    let mut terminal = terminal();
+    draw(&mut app, &mut terminal);
+    assert!(
+        screen(&terminal).contains("row 01"),
+        "{}",
+        screen(&terminal)
+    );
+    assert!(!screen(&terminal).contains("(no headers)"));
+
+    app.response_scroll = 5;
+    press(&mut app, KeyCode::Right);
+    assert_eq!(app.response_tab, response_panel::ResponseTab::Headers);
+    assert_eq!(app.response_scroll, 0);
+
+    draw(&mut app, &mut terminal);
+    let text = screen(&terminal);
+    assert!(text.contains("(no headers)"), "{text}");
+    assert!(!text.contains("row 01"), "{text}");
+
+    press(&mut app, KeyCode::Left);
+    assert_eq!(app.response_tab, response_panel::ResponseTab::Body);
+    press(&mut app, KeyCode::Left);
+    assert_eq!(app.response_tab, response_panel::ResponseTab::Headers);
 }
 
 #[test]

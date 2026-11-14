@@ -1,23 +1,55 @@
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     style::{Color, Style},
-    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs},
 };
 
 use super::{Response, SendState, view};
 
+/// The two response sections, cycled with the arrows like the request tabs.
+/// Body first: it is what a send is about, Headers are one key away.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum ResponseTab {
+    Body,
+    Headers,
+}
+
+impl ResponseTab {
+    pub const ALL: [Self; 2] = [Self::Body, Self::Headers];
+
+    fn index(self) -> usize {
+        match self {
+            ResponseTab::Body => 0,
+            ResponseTab::Headers => 1,
+        }
+    }
+
+    pub(super) fn switch_tabs(self, forward: bool) -> Self {
+        let len = Self::ALL.len();
+        let index = if forward {
+            (self.index() + 1) % len
+        } else {
+            (self.index() + len - 1) % len
+        };
+        Self::ALL[index]
+    }
+}
+
 /// The response text prepared for display: built once when the response
 /// arrives, then blitted by every frame. Building it is the expensive part
 /// (JSON pretty-printing dominates), so it stays out of the draw path. The
-/// content is kept line-split because `Text::from` on a huge string would
+/// sections are line-split because `Text::from` on a huge string would
 /// re-split it on every frame.
 #[derive(Debug)]
 pub(super) struct ResponseText {
-    pub(super) lines: Vec<String>,
+    /// Status and duration, shown on top of both tabs.
+    pub(super) summary: Vec<String>,
+    pub(super) headers: Vec<String>,
+    pub(super) body: Vec<String>,
 }
 
-/// Assembles status, duration, headers and body into the display text,
+/// Assembles status, duration, headers and body into display sections,
 /// split on newlines (a trailing `\n` yields a final empty line, as
 /// rendered).
 pub(super) fn build_response_text(response: &Response) -> ResponseText {
@@ -33,17 +65,28 @@ pub(super) fn build_response_text(response: &Response) -> ResponseText {
         })
         .collect();
 
-    let content = format!(
-        "{} {}\n{} ms\n\n{}\n\n{}",
-        response.status.as_u16(),
-        response.status.canonical_reason().unwrap_or(""),
-        response.duration_ms(),
-        headers.join("\n"),
-        super::content::pretty_json(&response.body).unwrap_or_else(|| response.body.clone())
-    );
+    let body = super::content::pretty_json(&response.body).unwrap_or_else(|| response.body.clone());
 
     ResponseText {
-        lines: content.split('\n').map(str::to_string).collect(),
+        summary: vec![
+            format!(
+                "{} {}",
+                response.status.as_u16(),
+                response.status.canonical_reason().unwrap_or("")
+            ),
+            format!("{} ms", response.duration_ms()),
+            String::new(),
+        ],
+        headers: if headers.is_empty() {
+            vec!["(no headers)".to_string()]
+        } else {
+            headers
+        },
+        body: if body.is_empty() {
+            vec!["(no body)".to_string()]
+        } else {
+            body.split('\n').map(str::to_string).collect()
+        },
     }
 }
 
@@ -52,53 +95,74 @@ pub(super) fn render(
     area: Rect,
     focused: bool,
     state: &SendState,
+    tab: ResponseTab,
     prepared: Option<&ResponseText>,
     scroll: u16,
 ) {
     let block = Block::bordered()
         .title("Response")
         .border_style(view::border_style(focused));
-    let viewport_height = block.inner(area).height;
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    let (content, style, total, offset) = match state {
-        SendState::Idle => (String::from("No response yet"), view::dim(), 1, 0),
-        SendState::Sending => (String::from("Sending…"), view::dim(), 1, 0),
+    match state {
         SendState::Done(response) => {
-            let style = Style::default();
-            // The normal path blits the window of the prepared lines;
-            // a direct `send` assignment bypassing `apply_response` builds
-            // its own lines here, at the usual cost.
-            let lines: &[String] = match prepared {
-                Some(text) => &text.lines,
-                None => &build_response_text(response).lines,
+            let [tabs, content] =
+                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(inner);
+            frame.render_widget(Tabs::new(["Body", "Headers"]).select(tab.index()), tabs);
+
+            // The normal path blits the prepared sections; a direct `send`
+            // assignment bypassing `apply_response` builds its own here, at
+            // the usual cost.
+            let fallback;
+            let text = match prepared {
+                Some(text) => text,
+                None => {
+                    fallback = build_response_text(response);
+                    &fallback
+                }
             };
-            let total = lines.len();
-            let offset = scroll.min(max_offset(total, viewport_height));
 
-            let start = (offset as usize).min(total);
-            let end = (start + viewport_height as usize).min(total);
-            let window = lines[start..end].join("\n");
+            let section = match tab {
+                ResponseTab::Body => &text.body,
+                ResponseTab::Headers => &text.headers,
+            };
+            let total = text.summary.len() + section.len();
+            let offset = scroll.min(max_offset(total, content.height));
 
-            (window, style, total, offset)
+            let window: Vec<&str> = text
+                .summary
+                .iter()
+                .chain(section.iter())
+                .skip(offset as usize)
+                .take(content.height as usize)
+                .map(String::as_str)
+                .collect();
+
+            frame.render_widget(Paragraph::new(window.join("\n")), content);
+            render_scrollbar(frame, area, total, offset, content.height);
         }
-        SendState::Failed(message) => (message.clone(), Style::new().fg(Color::Red), 1, 0),
-    };
+        state => {
+            let (message, style) = match state {
+                SendState::Idle => ("No response yet", view::dim()),
+                SendState::Sending => ("Sending…", view::dim()),
+                SendState::Failed(error) => (error.as_str(), Style::new().fg(Color::Red)),
+                SendState::Done(_) => unreachable!("handled above"),
+            };
 
-    // The content handed to the paragraph is exactly the visible window, so
-    // no scroll is applied at the widget level; `offset` only drives the
-    // scrollbar below.
-    frame.render_widget(
-        Paragraph::new(content.as_str()).style(style).block(block),
-        area,
-    );
+            frame.render_widget(Paragraph::new(message).style(style), inner);
+        }
+    }
+}
 
+fn render_scrollbar(frame: &mut Frame, area: Rect, total: usize, offset: u16, viewport: u16) {
     // The thumb rides the right border and only shows up once the content
     // actually overflows. `ScrollbarState` positions run in [0,
     // content_length - 1], so feeding it one "slot" per reachable offset
     // makes its maximum coincide with our clamp: the thumb then reaches the
     // exact bottom of the track when the last line is on screen.
-    if total > viewport_height as usize {
-        let slots = total - viewport_height as usize + 1;
+    if total > viewport as usize {
+        let slots = total - viewport as usize + 1;
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(None)
             .end_symbol(None);

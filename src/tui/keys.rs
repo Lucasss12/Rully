@@ -349,6 +349,18 @@ const RESPONSE_KEYS: &[Binding] = &[
         action: Action::Send,
     },
     Binding {
+        key: KeyCode::Left,
+        modifiers: KeyModifiers::NONE,
+        help: "← prev",
+        action: Action::TabPrevious,
+    },
+    Binding {
+        key: KeyCode::Right,
+        modifiers: KeyModifiers::NONE,
+        help: "→ next",
+        action: Action::TabNext,
+    },
+    Binding {
         key: KeyCode::Down,
         modifiers: KeyModifiers::NONE,
         help: "↓ down",

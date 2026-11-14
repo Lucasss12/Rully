@@ -460,6 +460,8 @@ enum PromptKind {
     NewEnvironment,
     RenameEnvironment { old: String },
     DeleteEnvironment { name: String },
+    SaveRequest,
+    SaveRequestName { collection: String },
 }
 
 #[derive(Debug)]
@@ -544,6 +546,35 @@ impl Prompt {
         }
     }
 
+    /// First step of saving an unsaved draft: the collection. The input starts
+    /// on an existing collection when there is one, and stays empty on a fresh
+    /// workspace.
+    fn save_request(collection: Option<String>) -> Self {
+        let mut input = TextArea::default();
+        if let Some(name) = collection {
+            input = TextArea::new(vec![name]);
+            input.move_cursor(CursorMove::End);
+        }
+
+        Self {
+            kind: PromptKind::SaveRequest,
+            input,
+            error: None,
+        }
+    }
+
+    /// Second step: the request is written as `collection/name.http` inside
+    /// the collection validated by the previous prompt.
+    fn save_request_name(collection: &str) -> Self {
+        Self {
+            kind: PromptKind::SaveRequestName {
+                collection: collection.to_string(),
+            },
+            input: TextArea::default(),
+            error: None,
+        }
+    }
+
     fn rename_environment(name: &str) -> Self {
         let mut input = TextArea::new(vec![name.to_string()]);
         input.move_cursor(CursorMove::End);
@@ -587,6 +618,8 @@ impl Prompt {
             PromptKind::NewEnvironment => "New environment",
             PromptKind::RenameEnvironment { .. } => "Rename environment",
             PromptKind::DeleteEnvironment { .. } => "Delete environment",
+            PromptKind::SaveRequest => "Save to collection",
+            PromptKind::SaveRequestName { .. } => "Request name",
         }
     }
 
@@ -1105,6 +1138,17 @@ impl App {
                 self.submit_prompt();
                 return;
             }
+            // The collection picker of a first save cycles the existing
+            // collections instead of moving a cursor inside the text.
+            KeyCode::Up | KeyCode::Down
+                if self
+                    .prompt
+                    .as_ref()
+                    .is_some_and(|prompt| matches!(prompt.kind, PromptKind::SaveRequest)) =>
+            {
+                self.cycle_save_collection(key_event.code == KeyCode::Down);
+                return;
+            }
             _ => {}
         }
 
@@ -1112,6 +1156,39 @@ impl App {
             && prompt.accepts_text()
         {
             prompt.input.input(key_event);
+        }
+    }
+
+    /// Swaps the collection picker of a first save to the next (or previous)
+    /// existing collection, wrapping around. Typing is untouched: a name
+    /// outside the list is simply created when the prompt is confirmed.
+    fn cycle_save_collection(&mut self, forward: bool) {
+        let Ok(names) = store::list_collections(&self.root) else {
+            return;
+        };
+        let names: Vec<String> = names
+            .into_iter()
+            .map(|name| name.trim_end_matches('/').to_string())
+            .collect();
+        if names.is_empty() {
+            return;
+        }
+
+        let current = self.prompt.as_ref().map_or(String::new(), |prompt| {
+            prompt.input.lines().join("").trim().to_string()
+        });
+        let step = if forward { 1 } else { names.len() - 1 };
+        let index = names
+            .iter()
+            .position(|name| *name == current)
+            .map_or(if forward { 0 } else { names.len() - 1 }, |position| {
+                (position + step) % names.len()
+            });
+
+        if let Some(prompt) = self.prompt.as_mut() {
+            prompt.input = TextArea::new(vec![names[index].clone()]);
+            prompt.input.move_cursor(CursorMove::End);
+            prompt.error = None;
         }
     }
 
@@ -1135,6 +1212,72 @@ impl App {
                     Ok(()) => {
                         self.error = None;
                         self.refresh_selecting(Some(&format!("{name}/")));
+                    }
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                    }
+                }
+            }
+            PromptKind::SaveRequest => {
+                let collection = match prompt_collection_name(&prompt.input) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                        return;
+                    }
+                };
+
+                // An existing collection is a fine target; a typed one is
+                // created on the fly so a first save never needs a detour.
+                match store::create_collection(&self.root, &collection) {
+                    Ok(()) | Err(AppError::CollectionAlreadyExists(_)) => {
+                        self.prompt = Some(Prompt::save_request_name(&collection));
+                    }
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                    }
+                }
+            }
+            PromptKind::SaveRequestName { collection } => {
+                let name = match prompt_request_name(&prompt.input) {
+                    Ok(name) => name,
+                    Err(error) => {
+                        prompt.error = Some(error.to_string());
+                        self.prompt = Some(prompt);
+                        return;
+                    }
+                };
+
+                let relative = format!("{collection}/{name}");
+                let saved = self
+                    .draft
+                    .as_ref()
+                    .map(|draft| {
+                        draft
+                            .source()
+                            .and_then(|content| store::save(&self.root, &relative, &content))
+                    })
+                    .unwrap_or_else(|| {
+                        Err(AppError::RequestNotFound("no request loaded".to_string()))
+                    });
+
+                match saved {
+                    Ok(_) => {
+                        self.error = None;
+                        // The draft becomes a file-backed request: the next
+                        // `Ctrl+S` rewrites in place instead of asking again.
+                        if let Some(draft) = self.draft.as_mut() {
+                            draft.relative = Some(relative);
+                        }
+
+                        if self.location.as_deref() == Some(collection.as_str()) {
+                            self.refresh_selecting(Some(&name));
+                        } else {
+                            self.refresh_selecting(None);
+                        }
                     }
                     Err(error) => {
                         prompt.error = Some(error.to_string());
@@ -1856,10 +1999,28 @@ impl App {
     }
 
     fn save_current_request(&mut self) {
-        match self.save_draft() {
-            Ok(()) => self.error = None,
-            Err(error) => self.error = Some(error.to_string()),
+        let is_saved = self
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.relative.is_some());
+
+        if is_saved {
+            match self.save_draft() {
+                Ok(()) => self.error = None,
+                Err(error) => self.error = Some(error.to_string()),
+            }
+            return;
         }
+
+        // An unsaved draft has no file to rewrite: ask where to create it.
+        // The picker starts on an existing collection when there is one.
+        let first = store::list_collections(&self.root).ok().and_then(|names| {
+            names
+                .first()
+                .map(|name| name.trim_end_matches('/').to_string())
+        });
+
+        self.prompt = Some(Prompt::save_request(first));
     }
 
     fn save_draft(&self) -> Result<(), AppError> {

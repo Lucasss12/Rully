@@ -58,7 +58,9 @@ pub(super) fn render(frame: &mut Frame, area: Rect, prompt: &Prompt) {
         | PromptKind::NewRequest { .. }
         | PromptKind::RenameRequest { .. }
         | PromptKind::NewEnvironment
-        | PromptKind::RenameEnvironment { .. } => {
+        | PromptKind::RenameEnvironment { .. }
+        | PromptKind::SaveRequest
+        | PromptKind::SaveRequestName { .. } => {
             frame.render_widget(&prompt.input, body);
         }
     }

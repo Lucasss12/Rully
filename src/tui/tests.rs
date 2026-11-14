@@ -1773,20 +1773,91 @@ fn saves_the_loaded_request_after_the_selection_moves() {
 }
 
 #[test]
-fn does_not_save_without_a_loaded_request() {
-    let fixture = Fixture::empty("save-without-request");
+fn an_unsaved_url_saves_through_the_two_prompts() {
+    let fixture = Fixture::with("save-as-flow", &["users"], &[]);
     let mut app = App::new(fixture.root());
+    app.draft.as_mut().unwrap().url = "https://api.example.com/ping".to_string();
+    app.focus = Focus::RequestBar;
 
-    press(&mut app, KeyCode::Tab);
     save(&mut app);
+    assert!(matches!(
+        app.prompt.as_ref().map(|p| &p.kind),
+        Some(PromptKind::SaveRequest)
+    ));
+    assert_eq!(app.prompt.as_ref().unwrap().input.lines(), ["users"]);
 
-    assert!(
-        app.error
-            .as_deref()
-            .is_some_and(|error| error.contains("no request loaded")),
-        "{:?}",
-        app.error
+    press(&mut app, KeyCode::Enter);
+    assert!(matches!(
+        app.prompt.as_ref().map(|p| &p.kind),
+        Some(PromptKind::SaveRequestName { collection }) if collection == "users"
+    ));
+
+    type_text(&mut app, "ping");
+    press(&mut app, KeyCode::Enter);
+
+    assert!(app.prompt.is_none());
+    assert_eq!(
+        app.draft.as_ref().unwrap().relative.as_deref(),
+        Some("users/ping.http")
     );
+
+    let saved = fs::read_to_string(fixture.root().join("collections/users/ping.http")).unwrap();
+    assert!(saved.contains("https://api.example.com/ping"), "{saved}");
+
+    // Once file-backed, saving rewrites in place instead of asking again.
+    save(&mut app);
+    assert!(app.prompt.is_none());
+    assert!(
+        fs::read_to_string(fixture.root().join("collections/users/ping.http"))
+            .unwrap()
+            .contains("https://api.example.com/ping")
+    );
+}
+
+#[test]
+fn the_collection_picker_cycles_existing_collections() {
+    let fixture = Fixture::with("save-as-cycle", &["alpha", "beta"], &[]);
+    let mut app = App::new(fixture.root());
+    app.focus = Focus::RequestBar;
+
+    save(&mut app);
+    assert_eq!(app.prompt.as_ref().unwrap().input.lines(), ["alpha"]);
+
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.prompt.as_ref().unwrap().input.lines(), ["beta"]);
+
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.prompt.as_ref().unwrap().input.lines(), ["alpha"]);
+
+    press(&mut app, KeyCode::Up);
+    assert_eq!(app.prompt.as_ref().unwrap().input.lines(), ["beta"]);
+
+    press(&mut app, KeyCode::Esc);
+    assert!(app.prompt.is_none());
+}
+
+#[test]
+fn a_typed_collection_is_created_on_the_first_save() {
+    let fixture = Fixture::empty("save-as-new-collection");
+    let mut app = App::new(fixture.root());
+    app.draft.as_mut().unwrap().url = "https://api.example.com/one".to_string();
+    app.focus = Focus::RequestBar;
+
+    save(&mut app);
+    assert_eq!(app.prompt.as_ref().unwrap().input.lines(), [""]);
+
+    type_text(&mut app, "fresh");
+    press(&mut app, KeyCode::Enter);
+    type_text(&mut app, "one");
+    press(&mut app, KeyCode::Enter);
+
+    assert!(app.prompt.is_none());
+    assert_eq!(
+        app.draft.as_ref().unwrap().relative.as_deref(),
+        Some("fresh/one.http")
+    );
+    assert!(fixture.root().join("collections/fresh").is_dir());
+    assert!(app.items.contains(&"fresh/".to_string()));
 }
 
 #[test]

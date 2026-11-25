@@ -745,7 +745,7 @@ const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 /// The top line above the panels: the app name and its version.
 fn app_header() -> Line<'static> {
     Line::from(vec![
-        Span::raw(env!("CARGO_PKG_NAME")),
+        Span::styled(env!("CARGO_PKG_NAME"), view::accent()),
         Span::styled(format!(" v{}", env!("CARGO_PKG_VERSION")), view::dim()),
     ])
 }

@@ -67,7 +67,9 @@ pub(super) fn render(
         Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(inner);
 
     frame.render_widget(
-        Tabs::new(["Headers", "Body", "Auth"]).select(tab.index()),
+        Tabs::new(["Headers", "Body", "Auth"])
+            .select(tab.index())
+            .highlight_style(view::accent()),
         tabs,
     );
 

@@ -837,6 +837,19 @@ fn focused_panel_has_a_cyan_border() {
 }
 
 #[test]
+fn the_method_shows_its_semantic_color() {
+    let fixture = Fixture::with("method-color", &["users"], &[]);
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+
+    // The GET placeholder sits in the bar's method cell, row 2: below the
+    // header, inside the bar borders.
+    assert_eq!(border_color(&terminal, 31, 2), Color::Green);
+}
+
+#[test]
 fn escape_returns_focus_to_the_tree() {
     let fixture = Fixture::with("escape-focus", &["users"], &[]);
     let mut app = App::new(fixture.root());

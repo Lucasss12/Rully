@@ -2,14 +2,15 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::Style,
+    text::Line,
     widgets::{Block, List, ListState, Paragraph, StatefulWidget, Widget},
 };
 
 use super::view;
 
-/// The environments strip below the tree: every `*.env` name, with `●` on the
-/// active one. Always rendered — seeing which environment is selected is the
-/// whole point of the section.
+/// The environments strip below the tree: every `*.env` name, with an accent
+/// dot on the active one. Always rendered — seeing which environment is
+/// selected is the whole point of the section.
 pub(super) struct EnvPanel<'a> {
     pub(super) environments: &'a [String],
     pub(super) active: Option<&'a str>,
@@ -34,9 +35,12 @@ impl StatefulWidget for EnvPanel<'_> {
 
         let items = self.environments.iter().map(|name| {
             if Some(name.as_str()) == self.active {
-                format!("● {name}")
+                Line::from(vec![
+                    ratatui::text::Span::styled("●", view::accent()),
+                    ratatui::text::Span::raw(format!(" {name}")),
+                ])
             } else {
-                format!("  {name}")
+                Line::from(format!("  {name}"))
             }
         });
 

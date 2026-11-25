@@ -2,6 +2,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Style},
+    text::{Line, Span},
     widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs},
 };
 
@@ -43,8 +44,8 @@ impl ResponseTab {
 /// re-split it on every frame.
 #[derive(Debug)]
 pub(super) struct ResponseText {
-    /// Status, duration and size, shown right of the tabs row.
-    pub(super) status_line: String,
+    /// Status (colored by class), duration and size, right of the tabs row.
+    pub(super) status_line: Line<'static>,
     pub(super) headers: Vec<String>,
     pub(super) body: Vec<String>,
 }
@@ -68,13 +69,18 @@ pub(super) fn build_response_text(response: &Response) -> ResponseText {
     let body = super::content::pretty_json(&response.body).unwrap_or_else(|| response.body.clone());
 
     ResponseText {
-        status_line: format!(
-            "{} {} · {} ms · {}",
-            response.status.as_u16(),
-            response.status.canonical_reason().unwrap_or(""),
-            response.duration_ms(),
-            format_size(response.size),
-        ),
+        status_line: Line::from(vec![
+            Span::styled(
+                format!("{} ", response.status.as_u16()),
+                view::status_style(response.status.as_u16()),
+            ),
+            Span::raw(format!(
+                "{} · {} ms · {}",
+                response.status.canonical_reason().unwrap_or(""),
+                response.duration_ms(),
+                format_size(response.size),
+            )),
+        ]),
         headers: if headers.is_empty() {
             vec!["(no headers)".to_string()]
         } else {
@@ -136,13 +142,18 @@ pub(super) fn render(
             // The tabs sit on the left of the row, the status summary on the
             // right — the Length reserves exactly its width, so both fit on
             // the narrowest terminal.
-            let status_width = text.status_line.chars().count() as u16;
+            let status_width = text.status_line.width() as u16;
             let [left, right] =
                 Layout::horizontal([Constraint::Min(12), Constraint::Length(status_width)])
                     .areas(tabs);
-            frame.render_widget(Tabs::new(["Body", "Headers"]).select(tab.index()), left);
             frame.render_widget(
-                Paragraph::new(text.status_line.as_str()).right_aligned(),
+                Tabs::new(["Body", "Headers"])
+                    .select(tab.index())
+                    .highlight_style(view::accent()),
+                left,
+            );
+            frame.render_widget(
+                Paragraph::new(text.status_line.clone()).right_aligned(),
                 right,
             );
 

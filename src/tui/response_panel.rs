@@ -43,8 +43,8 @@ impl ResponseTab {
 /// re-split it on every frame.
 #[derive(Debug)]
 pub(super) struct ResponseText {
-    /// Status and duration, shown on top of both tabs.
-    pub(super) summary: Vec<String>,
+    /// Status, duration and size, shown right of the tabs row.
+    pub(super) status_line: String,
     pub(super) headers: Vec<String>,
     pub(super) body: Vec<String>,
 }
@@ -68,15 +68,13 @@ pub(super) fn build_response_text(response: &Response) -> ResponseText {
     let body = super::content::pretty_json(&response.body).unwrap_or_else(|| response.body.clone());
 
     ResponseText {
-        summary: vec![
-            format!(
-                "{} {}",
-                response.status.as_u16(),
-                response.status.canonical_reason().unwrap_or("")
-            ),
-            format!("{} ms", response.duration_ms()),
-            String::new(),
-        ],
+        status_line: format!(
+            "{} {} · {} ms · {}",
+            response.status.as_u16(),
+            response.status.canonical_reason().unwrap_or(""),
+            response.duration_ms(),
+            format_size(response.size),
+        ),
         headers: if headers.is_empty() {
             vec!["(no headers)".to_string()]
         } else {
@@ -87,6 +85,23 @@ pub(super) fn build_response_text(response: &Response) -> ResponseText {
         } else {
             body.split('\n').map(str::to_string).collect()
         },
+    }
+}
+
+/// Human-readable size, the same shaping the CLI used to print.
+fn format_size(bytes: usize) -> String {
+    let units = ["B", "KB", "MB", "GB"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit < units.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{bytes} {}", units[unit])
+    } else {
+        format!("{size:.1} {}", units[unit])
     }
 }
 
@@ -107,13 +122,6 @@ pub(super) fn render(
 
     match state {
         SendState::Done(response) => {
-            let [tabs, content] =
-                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(inner);
-            frame.render_widget(Tabs::new(["Body", "Headers"]).select(tab.index()), tabs);
-
-            // The normal path blits the prepared sections; a direct `send`
-            // assignment bypassing `apply_response` builds its own here, at
-            // the usual cost.
             let fallback;
             let text = match prepared {
                 Some(text) => text,
@@ -123,17 +131,30 @@ pub(super) fn render(
                 }
             };
 
+            let [tabs, content] =
+                Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(inner);
+            // The tabs sit on the left of the row, the status summary on the
+            // right — the Length reserves exactly its width, so both fit on
+            // the narrowest terminal.
+            let status_width = text.status_line.chars().count() as u16;
+            let [left, right] =
+                Layout::horizontal([Constraint::Min(12), Constraint::Length(status_width)])
+                    .areas(tabs);
+            frame.render_widget(Tabs::new(["Body", "Headers"]).select(tab.index()), left);
+            frame.render_widget(
+                Paragraph::new(text.status_line.as_str()).right_aligned(),
+                right,
+            );
+
             let section = match tab {
                 ResponseTab::Body => &text.body,
                 ResponseTab::Headers => &text.headers,
             };
-            let total = text.summary.len() + section.len();
+            let total = section.len();
             let offset = scroll.min(max_offset(total, content.height));
 
-            let window: Vec<&str> = text
-                .summary
+            let window: Vec<&str> = section
                 .iter()
-                .chain(section.iter())
                 .skip(offset as usize)
                 .take(content.height as usize)
                 .map(String::as_str)

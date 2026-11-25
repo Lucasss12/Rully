@@ -10,7 +10,7 @@ use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{ListState, Paragraph},
 };
 use ratatui_textarea::{CursorMove, TextArea};
@@ -742,6 +742,14 @@ fn prompt_environment_name(input: &TextArea<'_>) -> Result<String, AppError> {
 const METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 const EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 
+/// The top line above the panels: the app name and its version.
+fn app_header() -> Line<'static> {
+    Line::from(vec![
+        Span::raw(env!("CARGO_PKG_NAME")),
+        Span::styled(format!(" v{}", env!("CARGO_PKG_VERSION")), view::dim()),
+    ])
+}
+
 impl App {
     /// Runs the draw/read-keys loop until `quit` is dispatched.
     fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
@@ -979,8 +987,15 @@ impl App {
         let title = view::bread_crumb(self.location.as_deref());
         let empty = view::empty_message(self.location.as_deref());
 
-        let [main, help] =
-            Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
+        let [header, main, help] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .areas(frame.area());
+
+        frame.render_widget(app_header(), header);
+
         let [tree_column, detail] =
             Layout::horizontal([Constraint::Length(30), Constraint::Fill(1)]).areas(main);
 

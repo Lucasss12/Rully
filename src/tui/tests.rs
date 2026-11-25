@@ -127,6 +127,7 @@ fn draws_the_initial_screen() {
     draw(&mut app, &mut terminal);
 
     let text = screen(&terminal);
+    assert!(text.contains("rully v0.1.0"), "{text}");
     assert!(text.contains("Collections"), "{text}");
     assert!(text.contains("auth/"), "{text}");
     assert!(text.contains("users/"), "{text}");
@@ -825,13 +826,14 @@ fn focused_panel_has_a_cyan_border() {
     let mut terminal = terminal();
 
     draw(&mut app, &mut terminal);
-    assert_eq!(border_color(&terminal, 0, 0), Color::Cyan);
+    // Row 1: the panels start below the app header line.
+    assert_eq!(border_color(&terminal, 0, 1), Color::Cyan);
 
     press(&mut app, KeyCode::Char('l'));
     draw(&mut app, &mut terminal);
 
-    assert_ne!(border_color(&terminal, 0, 0), Color::Cyan);
-    assert_eq!(border_color(&terminal, 30, 0), Color::Cyan);
+    assert_ne!(border_color(&terminal, 0, 1), Color::Cyan);
+    assert_eq!(border_color(&terminal, 30, 1), Color::Cyan);
 }
 
 #[test]

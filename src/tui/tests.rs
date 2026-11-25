@@ -583,19 +583,19 @@ fn tab_cycles_focus() {
 
     assert_eq!(app.focus, Focus::LeftPanel);
 
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     assert_eq!(app.focus, Focus::RequestBar);
 
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     assert_eq!(app.focus, Focus::Request);
 
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     assert_eq!(app.focus, Focus::Response);
 
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     assert_eq!(app.focus, Focus::Environments);
 
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     assert_eq!(app.focus, Focus::LeftPanel);
 }
 
@@ -612,7 +612,7 @@ fn opens_the_method_menu_on_m() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('m'));
     draw(&mut app, &mut terminal);
 
@@ -638,7 +638,7 @@ fn confirms_a_new_method() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('m'));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Enter);
@@ -669,8 +669,8 @@ fn arrows_switch_request_tabs() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
 
     draw(&mut app, &mut terminal);
     assert!(
@@ -753,8 +753,8 @@ fn shows_body_on_the_body_tab() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     draw(&mut app, &mut terminal);
 
@@ -783,8 +783,8 @@ fn shows_placeholders_for_an_empty_request() {
         screen(&terminal)
     );
 
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     draw(&mut app, &mut terminal);
     assert!(
@@ -827,7 +827,7 @@ fn focused_panel_has_a_cyan_border() {
     draw(&mut app, &mut terminal);
     assert_eq!(border_color(&terminal, 0, 0), Color::Cyan);
 
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     draw(&mut app, &mut terminal);
 
     assert_ne!(border_color(&terminal, 0, 0), Color::Cyan);
@@ -839,8 +839,8 @@ fn escape_returns_focus_to_the_tree() {
     let fixture = Fixture::with("escape-focus", &["users"], &[]);
     let mut app = App::new(fixture.root());
 
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     assert_eq!(app.focus, Focus::Request);
 
     press(&mut app, KeyCode::Esc);
@@ -860,7 +860,7 @@ fn cancels_the_method_menu() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('m'));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Esc);
@@ -884,7 +884,7 @@ fn creates_a_draft_when_none_is_loaded() {
     let mut terminal = terminal();
 
     draw(&mut app, &mut terminal);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('m'));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Enter);
@@ -914,8 +914,8 @@ fn opens_the_body_menu_on_b() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('b'));
     draw(&mut app, &mut terminal);
 
@@ -950,8 +950,8 @@ fn confirms_a_new_body_type() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('b'));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Down);
@@ -983,8 +983,8 @@ fn editing_an_empty_json_body_starts_from_a_scaffold() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('b'));
     press(&mut app, KeyCode::Down);
@@ -1004,8 +1004,8 @@ fn editing_an_empty_form_body_starts_from_a_scaffold() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('b'));
     press(&mut app, KeyCode::Down);
@@ -1027,8 +1027,8 @@ fn an_escaped_scaffold_is_not_stored() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('b'));
     press(&mut app, KeyCode::Down);
@@ -1059,8 +1059,8 @@ fn choosing_none_hides_the_body_without_losing_it() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('b'));
     press(&mut app, KeyCode::Up);
     press(&mut app, KeyCode::Enter);
@@ -1123,8 +1123,8 @@ fn shows_form_pairs_on_the_body_tab() {
     draw(&mut app, &mut terminal);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     draw(&mut app, &mut terminal);
 
@@ -1142,8 +1142,8 @@ fn ignores_b_without_a_request() {
     let mut terminal = terminal();
 
     draw(&mut app, &mut terminal);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('b'));
 
     assert!(!app.body_menu.open);
@@ -1157,7 +1157,7 @@ fn edits_the_url_and_saves_with_ctrl_s() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('e'));
 
     assert_eq!(app.edit_mode, EditMode::Url);
@@ -1190,7 +1190,7 @@ fn escape_cancels_url_editing() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('e'));
     type_text(&mut app, "/discarded");
     press(&mut app, KeyCode::Esc);
@@ -1218,8 +1218,8 @@ fn edits_the_body_with_newlines() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('e'));
 
@@ -1251,8 +1251,8 @@ fn seeds_the_json_body_pretty_printed() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('e'));
 
@@ -1276,8 +1276,8 @@ fn saves_edited_json_as_written() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('e'));
 
@@ -1305,8 +1305,8 @@ fn rejects_invalid_json_body() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('e'));
 
@@ -1328,8 +1328,8 @@ fn edits_headers_as_text() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('e'));
 
     assert_eq!(app.edit_mode, EditMode::Headers);
@@ -1359,8 +1359,8 @@ fn keeps_editing_headers_after_an_invalid_line() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('e'));
 
     let before = app.draft.as_ref().unwrap().headers.clone();
@@ -1386,8 +1386,8 @@ fn edits_bearer_auth() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('e'));
@@ -1423,8 +1423,8 @@ fn edits_basic_auth_as_user_and_password() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('e'));
@@ -1459,8 +1459,8 @@ fn rejects_basic_auth_without_a_colon() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('e'));
@@ -1495,8 +1495,8 @@ fn edits_api_key_auth() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('e'));
@@ -1524,8 +1524,8 @@ fn does_not_edit_auth_when_none_is_selected() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Right);
     press(&mut app, KeyCode::Char('e'));
@@ -1547,7 +1547,7 @@ fn saves_back_to_the_loaded_file_and_keeps_comments() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('e'));
     type_text(&mut app, "/search");
     save(&mut app);
@@ -1578,14 +1578,14 @@ fn opens_the_comments_editor_from_every_request_tab() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
 
     press(&mut app, KeyCode::Char('c'));
     assert_eq!(app.edit_mode, EditMode::Comments);
     assert_eq!(app.edit_input.lines().join("\n"), "# users\n# list");
     press(&mut app, KeyCode::Esc);
 
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
 
     for tab in 0..3 {
         press(&mut app, KeyCode::Char('c'));
@@ -1613,8 +1613,8 @@ fn edits_comments_in_a_hidden_editor_and_saves() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('c'));
 
     app.edit_input = TextArea::new(vec!["# updated".to_string(), "# second".to_string()]);
@@ -1642,8 +1642,8 @@ fn starts_an_empty_comments_editor_with_a_hash() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('c'));
 
     assert_eq!(app.edit_mode, EditMode::Comments);
@@ -1662,8 +1662,8 @@ fn adds_a_hash_when_starting_a_new_comment_line() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('c'));
     press(&mut app, KeyCode::Enter);
     type_text(&mut app, "new");
@@ -1690,8 +1690,8 @@ fn rejects_a_comment_line_without_a_hash() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('c'));
 
     app.edit_input = TextArea::new(vec!["not a comment".to_string()]);
@@ -1720,7 +1720,7 @@ fn saves_with_ctrl_s_outside_editing() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('m'));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Enter);
@@ -1751,13 +1751,13 @@ fn saves_the_loaded_request_after_the_selection_moves() {
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('m'));
     press(&mut app, KeyCode::Down);
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Esc);
     press(&mut app, KeyCode::Up);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     save(&mut app);
 
     assert!(app.error.is_none());
@@ -2162,7 +2162,7 @@ fn send_key_types_a_letter_while_editing() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     press(&mut app, KeyCode::Char('e'));
     assert_eq!(app.edit_mode, EditMode::Url);
 
@@ -2440,7 +2440,7 @@ fn selecting_an_environment_persists_it_and_loads_its_variables() {
 
     // Tab from the tree through the right column to the environments section.
     for _ in 0..4 {
-        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('l'));
     }
     assert_eq!(app.focus, Focus::Environments);
 
@@ -2461,7 +2461,7 @@ fn escape_leaves_the_environments_section() {
     let mut app = App::new(fixture.root());
 
     for _ in 0..4 {
-        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('l'));
     }
     assert_eq!(app.focus, Focus::Environments);
 
@@ -2556,7 +2556,7 @@ fn saves_a_request_with_placeholders_untouched() {
 
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    press(&mut app, KeyCode::Tab);
+    press(&mut app, KeyCode::Char('l'));
     save(&mut app);
 
     assert!(app.error.is_none(), "{:?}", app.error);
@@ -2575,7 +2575,7 @@ fn creates_an_environment_from_a_prompt() {
     let mut terminal = terminal();
 
     for _ in 0..4 {
-        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('l'));
     }
     press(&mut app, KeyCode::Char('n'));
     draw(&mut app, &mut terminal);
@@ -2603,7 +2603,7 @@ fn rejects_an_empty_environment_name() {
     let mut app = App::new(fixture.root());
 
     for _ in 0..4 {
-        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('l'));
     }
     press(&mut app, KeyCode::Char('n'));
     press(&mut app, KeyCode::Enter);
@@ -2626,7 +2626,7 @@ fn rejects_a_duplicate_environment_name() {
     let mut app = App::new(fixture.root());
 
     for _ in 0..4 {
-        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('l'));
     }
     press(&mut app, KeyCode::Char('n'));
     type_text(&mut app, "example"); // seeded by `init`
@@ -2651,7 +2651,7 @@ fn renames_the_selected_environment() {
     let mut app = App::new(fixture.root());
 
     for _ in 0..4 {
-        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('l'));
     }
     press(&mut app, KeyCode::Char('r'));
 
@@ -2693,7 +2693,7 @@ fn renaming_the_active_environment_keeps_it_active() {
     let mut app = App::new(fixture.root());
 
     for _ in 0..4 {
-        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('l'));
     }
     press(&mut app, KeyCode::Char('r'));
     app.prompt.as_mut().unwrap().input = TextArea::new(vec!["live".to_string()]);
@@ -2716,7 +2716,7 @@ fn deleting_the_active_environment_clears_the_selection() {
     let mut terminal = terminal();
 
     for _ in 0..4 {
-        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('l'));
     }
     press(&mut app, KeyCode::Char('d'));
     draw(&mut app, &mut terminal);
@@ -2753,7 +2753,7 @@ fn edits_environment_variables_in_a_modal() {
     let mut terminal = terminal();
 
     for _ in 0..4 {
-        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('l'));
     }
     press(&mut app, KeyCode::Char('e'));
 
@@ -2789,7 +2789,7 @@ fn rejects_invalid_environment_content_while_editing() {
     let mut app = App::new(fixture.root());
 
     for _ in 0..4 {
-        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('l'));
     }
     press(&mut app, KeyCode::Char('e'));
 
@@ -2814,7 +2814,7 @@ fn escape_cancels_the_environment_editor() {
     let mut app = App::new(fixture.root());
 
     for _ in 0..4 {
-        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Char('l'));
     }
     press(&mut app, KeyCode::Char('e'));
     assert_eq!(app.edit_mode, EditMode::Environment);

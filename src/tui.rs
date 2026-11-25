@@ -114,6 +114,38 @@ enum Focus {
     Environments,
 }
 
+impl Focus {
+    /// The panels in layout order; `h`/`l` cycle this ring.
+    const ALL: [Self; 5] = [
+        Self::LeftPanel,
+        Self::RequestBar,
+        Self::Request,
+        Self::Response,
+        Self::Environments,
+    ];
+
+    fn index(self) -> usize {
+        match self {
+            Self::LeftPanel => 0,
+            Self::RequestBar => 1,
+            Self::Request => 2,
+            Self::Response => 3,
+            Self::Environments => 4,
+        }
+    }
+
+    /// Steps to the next (or previous) panel, wrapping around the ring.
+    fn step(self, forward: bool) -> Self {
+        let len = Self::ALL.len();
+        let index = if forward {
+            (self.index() + 1) % len
+        } else {
+            (self.index() + len - 1) % len
+        };
+        Self::ALL[index]
+    }
+}
+
 /// The request being viewed: a decoded `.http` file held in memory. It is a
 /// draft because the TUI will eventually edit it before saving.
 #[derive(Debug)]
@@ -1648,6 +1680,8 @@ impl App {
             Action::DeleteRequest => self.open_delete_request_prompt(),
 
             Action::NextFocus => self.next_focus(),
+
+            Action::FocusPrevious => self.previous_focus(),
             Action::MenuPrevious => self.menu_previous(),
             Action::MenuNext => self.menu_next(),
             Action::MenuConfirm => self.menu_confirm(),
@@ -1786,15 +1820,14 @@ impl App {
         self.exit = true;
     }
 
-    /// `Tab`: moves focus to the next panel, in layout order.
+    /// `l`: moves focus to the next panel, in layout order.
     fn next_focus(&mut self) {
-        self.focus = match self.focus {
-            Focus::LeftPanel => Focus::RequestBar,
-            Focus::RequestBar => Focus::Request,
-            Focus::Request => Focus::Response,
-            Focus::Response => Focus::Environments,
-            Focus::Environments => Focus::LeftPanel,
-        };
+        self.focus = self.focus.step(true);
+    }
+
+    /// `h`: moves focus to the previous panel, in layout order.
+    fn previous_focus(&mut self) {
+        self.focus = self.focus.step(false);
     }
 
     fn open_method_menu(&mut self) {

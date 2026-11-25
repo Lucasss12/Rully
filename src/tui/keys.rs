@@ -16,6 +16,7 @@ pub(super) enum Action {
     DeleteRequest,
 
     NextFocus,
+    FocusPrevious,
     MenuPrevious,
     MenuNext,
     MenuConfirm,
@@ -106,9 +107,15 @@ const ROOT_KEYS: &[Binding] = &[
         action: Action::Send,
     },
     Binding {
-        key: KeyCode::Tab,
+        key: KeyCode::Char('h'),
         modifiers: KeyModifiers::NONE,
-        help: "tab",
+        help: "h prev",
+        action: Action::FocusPrevious,
+    },
+    Binding {
+        key: KeyCode::Char('l'),
+        modifiers: KeyModifiers::NONE,
+        help: "l next",
         action: Action::NextFocus,
     },
 ];
@@ -163,9 +170,15 @@ const COLLECTION_KEYS: &[Binding] = &[
         action: Action::Send,
     },
     Binding {
-        key: KeyCode::Tab,
+        key: KeyCode::Char('h'),
         modifiers: KeyModifiers::NONE,
-        help: "tab",
+        help: "h prev",
+        action: Action::FocusPrevious,
+    },
+    Binding {
+        key: KeyCode::Char('l'),
+        modifiers: KeyModifiers::NONE,
+        help: "l next",
         action: Action::NextFocus,
     },
     Binding {
@@ -202,9 +215,15 @@ const MENU_KEYS: &[Binding] = &[
         action: Action::MenuConfirm,
     },
     Binding {
-        key: KeyCode::Tab,
+        key: KeyCode::Char('h'),
         modifiers: KeyModifiers::NONE,
-        help: "tab",
+        help: "h prev",
+        action: Action::FocusPrevious,
+    },
+    Binding {
+        key: KeyCode::Char('l'),
+        modifiers: KeyModifiers::NONE,
+        help: "l next",
         action: Action::NextFocus,
     },
     Binding {
@@ -253,9 +272,15 @@ const REQUEST_BAR_KEYS: &[Binding] = &[
         action: Action::Send,
     },
     Binding {
-        key: KeyCode::Tab,
+        key: KeyCode::Char('h'),
         modifiers: KeyModifiers::NONE,
-        help: "tab",
+        help: "h prev",
+        action: Action::FocusPrevious,
+    },
+    Binding {
+        key: KeyCode::Char('l'),
+        modifiers: KeyModifiers::NONE,
+        help: "l next",
         action: Action::NextFocus,
     },
     Binding {
@@ -322,9 +347,15 @@ const REQUEST_KEYS: &[Binding] = &[
         action: Action::Send,
     },
     Binding {
-        key: KeyCode::Tab,
+        key: KeyCode::Char('h'),
         modifiers: KeyModifiers::NONE,
-        help: "tab",
+        help: "h prev",
+        action: Action::FocusPrevious,
+    },
+    Binding {
+        key: KeyCode::Char('l'),
+        modifiers: KeyModifiers::NONE,
+        help: "l next",
         action: Action::NextFocus,
     },
     Binding {
@@ -373,9 +404,15 @@ const RESPONSE_KEYS: &[Binding] = &[
         action: Action::ResponseScrollPrevious,
     },
     Binding {
-        key: KeyCode::Tab,
+        key: KeyCode::Char('h'),
         modifiers: KeyModifiers::NONE,
-        help: "tab",
+        help: "h prev",
+        action: Action::FocusPrevious,
+    },
+    Binding {
+        key: KeyCode::Char('l'),
+        modifiers: KeyModifiers::NONE,
+        help: "l next",
         action: Action::NextFocus,
     },
     Binding {
@@ -436,9 +473,15 @@ const ENV_KEYS: &[Binding] = &[
         action: Action::EditEnvironment,
     },
     Binding {
-        key: KeyCode::Tab,
+        key: KeyCode::Char('h'),
         modifiers: KeyModifiers::NONE,
-        help: "tab",
+        help: "h prev",
+        action: Action::FocusPrevious,
+    },
+    Binding {
+        key: KeyCode::Char('l'),
+        modifiers: KeyModifiers::NONE,
+        help: "l next",
         action: Action::NextFocus,
     },
     Binding {

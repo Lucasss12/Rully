@@ -23,6 +23,7 @@ impl StatefulWidget for EnvPanel<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
         let block = Block::bordered()
             .title("Environments")
+            .title_style(view::title())
             .border_style(view::border_style(self.focused));
 
         if self.environments.is_empty() {

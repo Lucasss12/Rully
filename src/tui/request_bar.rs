@@ -36,7 +36,7 @@ pub(super) fn render(
 
     frame.render_widget(
         Paragraph::new(method)
-            .style(view::method_style(method))
+            .style(view::key())
             .block(Block::new().borders(Borders::RIGHT)),
         method_area,
     );

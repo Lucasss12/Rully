@@ -21,13 +21,21 @@ impl StatefulWidget for LeftPanel<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ListState) {
         if let Some(error) = self.error {
             Paragraph::new(error)
-                .block(Block::bordered().title(self.title))
+                .block(
+                    Block::bordered()
+                        .title(self.title)
+                        .title_style(view::title()),
+                )
                 .render(area, buf);
             return;
         }
         if self.items.is_empty() {
             Paragraph::new(self.empty)
-                .block(Block::bordered().title(self.title))
+                .block(
+                    Block::bordered()
+                        .title(self.title)
+                        .title_style(view::title()),
+                )
                 .render(area, buf);
             return;
         }
@@ -37,6 +45,7 @@ impl StatefulWidget for LeftPanel<'_> {
 
         let block = Block::bordered()
             .title(self.title)
+            .title_style(view::title())
             .border_style(view::border_style(self.focused))
             .title_bottom(Line::from(label).right_aligned());
 

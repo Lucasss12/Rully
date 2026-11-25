@@ -994,7 +994,22 @@ impl App {
         ])
         .areas(frame.area());
 
-        frame.render_widget(app_header(), header);
+        // The header carries the brand on the left and, in navigation mode,
+        // the invariant keys on the right: editing, menus and prompts have
+        // their own keys, so the header would lie.
+        let menu_open = self.method_menu.open || self.body_menu.open || self.auth_menu.open;
+        let sending = matches!(self.send, SendState::Sending);
+        let navigating = !menu_open && self.edit_mode == EditMode::None && self.prompt.is_none();
+
+        let [brand, keys] =
+            Layout::horizontal([Constraint::Length(12), Constraint::Fill(1)]).areas(header);
+        frame.render_widget(app_header(), brand);
+        if navigating {
+            frame.render_widget(
+                Paragraph::new(keys::static_help(sending)).right_aligned(),
+                keys,
+            );
+        }
 
         let [tree_column, detail] =
             Layout::horizontal([Constraint::Length(30), Constraint::Fill(1)]).areas(main);
@@ -1063,19 +1078,13 @@ impl App {
             self.response_scroll,
         );
 
-        let menu_open = self.method_menu.open || self.body_menu.open || self.auth_menu.open;
-        let sending = matches!(self.send, SendState::Sending);
-
         frame.render_widget(
-            Paragraph::new(keys::help_line(
-                keys::current_binding(
-                    self.focus,
-                    self.location.as_deref(),
-                    menu_open,
-                    self.edit_mode,
-                ),
-                sending,
-            )),
+            Paragraph::new(keys::help_line(keys::current_binding(
+                self.focus,
+                self.location.as_deref(),
+                menu_open,
+                self.edit_mode,
+            ))),
             help,
         );
 

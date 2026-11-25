@@ -58,6 +58,7 @@ pub(super) fn render(
     };
     let block = Block::bordered()
         .title(title)
+        .title_style(view::title())
         .border_style(view::border_style(focused));
 
     let inner = block.inner(area);
@@ -69,6 +70,7 @@ pub(super) fn render(
     frame.render_widget(
         Tabs::new(["Headers", "Body", "Auth"])
             .select(tab.index())
+            .style(view::title())
             .highlight_style(view::accent()),
         tabs,
     );

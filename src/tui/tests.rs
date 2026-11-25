@@ -820,24 +820,26 @@ fn reports_an_invalid_request_file() {
 }
 
 #[test]
-fn focused_panel_has_a_cyan_border() {
+fn focused_panel_has_a_blue_border() {
     let fixture = Fixture::with("focused-border", &["users"], &[]);
     let mut app = App::new(fixture.root());
     let mut terminal = terminal();
 
     draw(&mut app, &mut terminal);
     // Row 1: the panels start below the app header line.
-    assert_eq!(border_color(&terminal, 0, 1), Color::Cyan);
+    assert_eq!(border_color(&terminal, 0, 1), Color::Rgb(122, 162, 247));
 
     press(&mut app, KeyCode::Char('l'));
     draw(&mut app, &mut terminal);
 
-    assert_ne!(border_color(&terminal, 0, 1), Color::Cyan);
-    assert_eq!(border_color(&terminal, 30, 1), Color::Cyan);
+    // The unfocused panel recedes into the theme's grey violet; the focused
+    // one keeps the accent blue.
+    assert_eq!(border_color(&terminal, 0, 1), Color::Rgb(86, 95, 137));
+    assert_eq!(border_color(&terminal, 30, 1), Color::Rgb(122, 162, 247));
 }
 
 #[test]
-fn the_method_shows_its_semantic_color() {
+fn the_method_shows_the_key_color() {
     let fixture = Fixture::with("method-color", &["users"], &[]);
     let mut app = App::new(fixture.root());
     let mut terminal = terminal();
@@ -846,7 +848,73 @@ fn the_method_shows_its_semantic_color() {
 
     // The GET placeholder sits in the bar's method cell, row 2: below the
     // header, inside the bar borders.
-    assert_eq!(border_color(&terminal, 31, 2), Color::Green);
+    assert_eq!(border_color(&terminal, 31, 2), Color::Rgb(122, 162, 247));
+}
+
+#[test]
+fn the_panel_titles_are_violet() {
+    let fixture = Fixture::with("panel-title-color", &["users"], &[]);
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+
+    // The first character of the `Collections` title.
+    assert_eq!(border_color(&terminal, 1, 1), Color::Rgb(187, 154, 247));
+}
+
+#[test]
+fn the_header_merges_the_panel_keys() {
+    let fixture = Fixture::with("header-keys", &["users"], &[]);
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+
+    let text = screen(&terminal);
+    assert!(text.contains("h/l prev/next"), "{text}");
+    assert!(!text.contains("h prev"), "{text}");
+    // `esc back` is part of the static header, everywhere.
+    assert!(text.contains("esc back"), "{text}");
+}
+
+#[test]
+fn the_footer_colors_the_keys_blue() {
+    let fixture = Fixture::with("footer-color", &["users"], &[]);
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+
+    // The footer starts with the `↑` glyph, rendered in the accent blue.
+    assert_eq!(border_color(&terminal, 0, 23), Color::Rgb(122, 162, 247));
+}
+
+#[test]
+fn the_footer_leaves_escape_to_the_header() {
+    let fixture = Fixture::with("footer-no-escape", &["users"], &[]);
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+    press(&mut app, KeyCode::Enter);
+    draw(&mut app, &mut terminal);
+
+    // Nested in a collection: the header advertises `esc back`, the footer
+    // does not repeat it — while the key itself still works.
+    assert!(
+        screen(&terminal).contains("esc back"),
+        "{}",
+        screen(&terminal)
+    );
+    assert!(
+        !lines(&terminal)[23].contains("esc back"),
+        "{}",
+        screen(&terminal)
+    );
+
+    press(&mut app, KeyCode::Esc);
+    assert!(app.location.is_none());
 }
 
 #[test]
@@ -2120,7 +2188,7 @@ fn x_cancels_an_in_flight_request_from_any_panel() {
 }
 
 #[test]
-fn the_help_line_offers_cancel_only_while_sending() {
+fn the_header_offers_cancel_only_while_sending() {
     let fixture = Fixture::new("send-cancel-help");
     let mut app = App::new(fixture.root());
     let mut terminal = terminal();
@@ -2139,6 +2207,31 @@ fn the_help_line_offers_cancel_only_while_sending() {
         "{}",
         screen(&terminal)
     );
+}
+
+#[test]
+fn the_header_hides_the_invariant_keys_outside_navigation() {
+    let fixture = Fixture::new("header-hidden-while-editing");
+    let mut app = App::new(fixture.root());
+    let mut terminal = terminal();
+
+    draw(&mut app, &mut terminal);
+    assert!(
+        screen(&terminal).contains("s send"),
+        "{}",
+        screen(&terminal)
+    );
+
+    // While editing, `h`/`l`/`s` are plain letters: the header stops
+    // advertising them and the footer carries the editing keys.
+    press(&mut app, KeyCode::Char('l'));
+    press(&mut app, KeyCode::Char('e'));
+    draw(&mut app, &mut terminal);
+
+    let text = screen(&terminal);
+    assert!(!text.contains("s send"), "{text}");
+    assert!(!text.contains("q quit"), "{text}");
+    assert!(text.contains("esc cancel"), "{text}");
 }
 
 #[test]

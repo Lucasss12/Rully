@@ -1,7 +1,6 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs},
 };
@@ -122,6 +121,7 @@ pub(super) fn render(
 ) {
     let block = Block::bordered()
         .title("Response")
+        .title_style(view::title())
         .border_style(view::border_style(focused));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -149,6 +149,7 @@ pub(super) fn render(
             frame.render_widget(
                 Tabs::new(["Body", "Headers"])
                     .select(tab.index())
+                    .style(view::title())
                     .highlight_style(view::accent()),
                 left,
             );
@@ -177,8 +178,8 @@ pub(super) fn render(
         state => {
             let (message, style) = match state {
                 SendState::Idle => ("No response yet", view::dim()),
-                SendState::Sending => ("Sending…", view::dim()),
-                SendState::Failed(error) => (error.as_str(), Style::new().fg(Color::Red)),
+                SendState::Sending => ("Sending…", view::warning()),
+                SendState::Failed(error) => (error.as_str(), view::error()),
                 SendState::Done(_) => unreachable!("handled above"),
             };
 

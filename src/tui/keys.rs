@@ -1,5 +1,6 @@
-use super::{EditMode, Focus};
+use super::{EditMode, Focus, view};
 use crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::text::{Line, Span};
 
 #[derive(Clone, Copy)]
 pub(super) enum Action {
@@ -473,6 +474,12 @@ const ENV_KEYS: &[Binding] = &[
         action: Action::EditEnvironment,
     },
     Binding {
+        key: KeyCode::Char('s'),
+        modifiers: KeyModifiers::NONE,
+        help: "s send",
+        action: Action::Send,
+    },
+    Binding {
         key: KeyCode::Char('h'),
         modifiers: KeyModifiers::NONE,
         help: "h prev",
@@ -532,14 +539,67 @@ pub(super) fn current_binding(
     }
 }
 
-pub(super) fn help_line(bindings: &[Binding], sending: bool) -> String {
-    let mut entries: Vec<&str> = bindings.iter().map(|binding| binding.help).collect();
+/// One `key action` entry: the key glyph in blue, the action dimmed.
+fn entry(key: &str, action: &str) -> Vec<Span<'static>> {
+    vec![
+        Span::styled(key.to_string(), view::key()),
+        Span::styled(format!(" {action}"), view::dim()),
+    ]
+}
 
-    // An in-flight request can be cancelled from any panel. First, so it
-    // survives the narrowest terminals.
+fn separator() -> Span<'static> {
+    Span::styled(" · ", view::dim())
+}
+
+/// The keys shown right of the app name: they mean the same thing on every
+/// panel, so the footer never repeats them. `x` appears only while a request
+/// is in flight.
+pub(super) fn static_help(sending: bool) -> Line<'static> {
+    let mut spans: Vec<Span> = Vec::new();
+
     if sending {
-        entries.insert(0, "x cancel");
+        spans.extend(entry("x", "cancel"));
+        spans.push(separator());
+    }
+    spans.extend(entry("s", "send"));
+    spans.push(separator());
+    spans.extend(entry("h/l", "prev/next"));
+    spans.push(separator());
+    spans.extend(entry("esc", "back"));
+    spans.push(separator());
+    spans.extend(entry("q", "quit"));
+
+    Line::from(spans)
+}
+
+fn is_static(action: Action) -> bool {
+    matches!(
+        action,
+        Action::NextFocus
+            | Action::FocusPrevious
+            | Action::Send
+            | Action::Quit
+            | Action::FocusLeftPanel
+            | Action::GoBack
+    )
+}
+
+/// The contextual keys of the current panel: every help entry is shaped
+/// `key action`, so colouring the first token works for glyphs, arrows and
+/// words alike.
+pub(super) fn help_line(bindings: &[Binding]) -> Line<'static> {
+    let mut spans: Vec<Span> = Vec::new();
+    for (index, binding) in bindings
+        .iter()
+        .filter(|binding| !is_static(binding.action))
+        .enumerate()
+    {
+        if index > 0 {
+            spans.push(separator());
+        }
+        let (key, action) = binding.help.split_once(' ').unwrap_or((binding.help, ""));
+        spans.extend(entry(key, action));
     }
 
-    entries.join("  ·  ")
+    Line::from(spans)
 }
